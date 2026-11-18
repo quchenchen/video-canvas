@@ -137,16 +137,20 @@ export function ModelBasicForm({
           </FormField>
           <FormField
             size="default"
-            label="上游模型标识"
+            label={kind === "video" ? "接入点 ID / 模型名" : "上游模型标识"}
             htmlFor="model-upstream"
             required
             error={issueFor(issues, "channels[0].upstream_model")}
-            tip="插件把这个值作为 model 参数发给上游网关。"
+            tip={
+              kind === "video"
+                ? "火山方舟 / BytePlus 视频模型填接入点 ID（ep-xxx）；其它填实际模型名。插件把它作为 model 参数发给上游。"
+                : "插件把这个值作为 model 参数发给上游网关。"
+            }
           >
             <Input
               id="model-upstream"
               className="font-mono"
-              placeholder="实际发给上游的模型名"
+              placeholder={kind === "video" ? "ep-xxxxxxxx-xxxxx 或模型名" : "实际发给上游的模型名"}
               value={upstreamModel}
               aria-invalid={!!issueFor(issues, "channels[0].upstream_model")}
               onChange={(event) =>

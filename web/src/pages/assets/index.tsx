@@ -12,9 +12,10 @@ import {
 
 import { HistoryView } from "./history-view";
 import { LibraryView } from "./library-view";
+import { VirtualAvatarView } from "./virtual-avatar-view";
 
-/** 两个范围从左到右的顺序，决定切换时内容滑入的方向 */
-const TAB_ORDER: readonly AssetsTab[] = ["history", "library"];
+/** 各范围从左到右的顺序，决定切换时内容滑入的方向 */
+const TAB_ORDER: readonly AssetsTab[] = ["history", "library", "avatars"];
 
 /**
  * 资产页（设计稿 docs/design/资产库）：大标题旁是「生成历史 / 个人资产库」两个范围。
@@ -54,6 +55,7 @@ export default function AssetsPage() {
           options={[
             { value: "history", label: "生成历史" },
             { value: "library", label: "个人资产库" },
+            { value: "avatars", label: "虚拟人像库" },
           ]}
         />
       </div>
@@ -69,6 +71,7 @@ export default function AssetsPage() {
           {route.tab === "library" && (
             <LibraryView folder={route.folder} onFolderChange={changeFolder} />
           )}
+          {route.tab === "avatars" && <VirtualAvatarView />}
         </motion.div>
       </MotionConfig>
     </div>

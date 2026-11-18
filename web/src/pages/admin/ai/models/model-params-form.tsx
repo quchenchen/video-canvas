@@ -15,14 +15,17 @@ import {
   checkIdleTimeout,
   readModelApiFormat,
   readModelChannel,
+  readModelFiling,
   readModelKind,
   readModelString,
   withModelField,
+  withModelFiling,
 } from "@/utils/admin/model-body";
 import { suggestedMediaCapabilities } from "@/utils/admin/model-limits";
 import { PROMPT_FORMATS, withPromptFormat } from "@/utils/tasks/capabilities";
 
 import { ContextLimitsAssist } from "./context-limits-assist";
+import { FilingSection } from "./filing-section";
 import {
   ContextEditor,
   LIMITS,
@@ -79,11 +82,13 @@ export function ModelParamsForm({
   body,
   issues,
   warnings,
+  modelKey,
   onChange,
 }: {
   body: Record<string, unknown>;
   issues: ConfigIssue[];
   warnings: ConfigIssue[];
+  modelKey?: string;
   onChange: (mutate: BodyMutator) => void;
 }) {
   const deadline = readModelString(body, "deadline");
@@ -197,6 +202,14 @@ export function ModelParamsForm({
             <p className="text-destructive mt-2 text-xs">{issueFor(issues, "capabilities.ops")}</p>
           )}
         </FormSection>
+      )}
+
+      {kind === "video" && (
+        <FilingSection
+          value={readModelFiling(body)}
+          modelKey={modelKey}
+          onChange={(next) => onChange((b) => withModelFiling(b, next))}
+        />
       )}
 
       {(kind === "text" || isAgent) && (

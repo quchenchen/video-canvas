@@ -13,6 +13,7 @@ import {
 } from "@/components/canvas-editor/node-actions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { useFilings } from "@/hooks/use-filings";
 import { useRemoteModels } from "@/hooks/use-models";
 import { BottomToolbar } from "@/pages/canvas/chrome/bottom-toolbar";
 import { ViewControls } from "@/pages/canvas/chrome/view-controls";
@@ -143,6 +144,16 @@ function AssetList({ items }: { items: AssetItem[] }) {
 
   const counts = useMemo(() => countByType(items, ui.filter), [items, ui.filter]);
   const shown = useMemo(() => filterAssets(items, ui.type, ui.filter), [items, ui.filter, ui.type]);
+  // 角色卡主图 assetId 去重后批量查备案状态（未生成形象的没有 assetId，不查）
+  const filingAssetIds = useMemo(
+    () => [
+      ...new Set(
+        items.filter((i) => i.type === "character" && i.data.assetId).map((i) => i.data.assetId!),
+      ),
+    ],
+    [items],
+  );
+  const { filings, update: updateFiling } = useFilings(filingAssetIds);
   const pending = useMemo(() => pendingGenerate(items, ui.type), [items, ui.type]);
   /** 能勾选生成的：待生成、失败，以及已生成（重新生成） */
   const candidates = useMemo(() => generatable(items, ui.type), [items, ui.type]);
@@ -369,6 +380,19 @@ function AssetList({ items }: { items: AssetItem[] }) {
                 onLocate={() => locate(item.id)}
                 onEditPrompt={() => usePromptEditor.getState().open(item.id)}
                 onEditCharacter={() => useCharacterDetail.getState().open(item.id)}
+                filing={
+                  item.data.assetId
+                    ? (filings[item.data.assetId] ?? {
+                        assetId: item.data.assetId,
+                        status: "none",
+                        filingId: "",
+                        error: "",
+                        sourceUrl: item.data.src ?? "",
+                        updatedAt: 0,
+                      })
+                    : undefined
+                }
+                onFilingUpdate={updateFiling}
                 onUpload={() => editor.fill.pickFile(item.id)}
                 onPickLibrary={() => editor.fill.pickAsset(item.id)}
               />

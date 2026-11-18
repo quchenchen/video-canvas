@@ -46,7 +46,9 @@ type Options struct {
 	Secrets provider.SecretResolver
 	Assets  provider.AssetStore
 	Saver   provider.AssetSaver
-	Now     func() time.Time
+	// AssetURIs 把已备案素材换成上游资产 URI（方舟 asset://…）：未配置时所有素材仍走普通 URL。
+	AssetURIs provider.AssetURIRef
+	Now       func() time.Time
 
 	HookTimeout         time.Duration
 	DefaultTimeout      time.Duration
@@ -1018,6 +1020,12 @@ func (o *operation) resolveRef(ctx context.Context, ref fileRef) (any, error) {
 	if !ok {
 		return nil, pluginFaultf("文件引用 input:%s 不是任务输入中的媒体字段", ref.field)
 	}
+	// 已备案素材优先用资产 URI：方舟对含真人人脸的参考图只认 asset://，传普通 URL 会被输入风控拦截。
+	if ref.as == "url" {
+		if uri, ok := o.filedAssetURI(ctx, id); ok {
+			return uri, nil
+		}
+	}
 	f, err := o.e.opts.Assets.Open(ctx, o.task.UserID, id)
 	if err != nil {
 		return nil, terminalErr(codeAssetUnavailable, "打开任务输入素材失败", redactError(err, o.red.str))
@@ -1042,6 +1050,20 @@ func (o *operation) resolveRef(ctx context.Context, ref fileRef) (any, error) {
 	default:
 		return nil, pluginFault("文件引用 as 不合法")
 	}
+}
+
+// filedAssetURI 把已备案素材换成上游资产 URI（方舟 asset://asset-xxx）。
+// 只在模型打开了虚拟人像库备案（capabilities.filing.enabled）时生效：没开备案的模型没有可信素材，
+// 不能把普通素材换成 asset://，未命中一律返回 false 让调用方继续用普通 URL。
+func (o *operation) filedAssetURI(ctx context.Context, id uint64) (string, bool) {
+	if o.e.opts.AssetURIs == nil || o.model == nil {
+		return "", false
+	}
+	filing := o.model.Capabilities.Filing
+	if filing == nil || !filing.Enabled {
+		return "", false
+	}
+	return o.e.opts.AssetURIs.AssetURI(ctx, o.task.UserID, id, o.model.Key)
 }
 
 func (o *operation) httpRequest(ctx context.Context, b *builtRequest) (*http.Request, func(), error) {

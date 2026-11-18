@@ -306,6 +306,14 @@ type AssetStore interface {
 	Open(ctx context.Context, userID, assetID uint64) (*AssetFile, error)
 }
 
+// AssetURIRef 把「已备案素材」换成上游可直接引用的资产 URI（火山方舟的 asset://asset-xxx）。
+//
+// 方舟 Seedance 2.0/2.5 不接受含真人人脸的普通图片 URL，只有已授权真人素材以资产 URI 引用才放行；
+// 未备案、备案未生效、或该模型不支持时返回 ok=false，调用方继续用普通 URL。
+type AssetURIRef interface {
+	AssetURI(ctx context.Context, userID, assetID uint64, modelKey string) (uri string, ok bool)
+}
+
 // ErrAssetNotFound 素材不存在或不属于该用户。
 var ErrAssetNotFound = errors.New("素材不存在")
 

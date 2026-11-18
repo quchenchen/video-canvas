@@ -3,6 +3,8 @@ import { useDropzone, type FileRejection } from "react-dropzone";
 import { ChevronRight, Upload } from "lucide-react";
 import { toast } from "sonner";
 
+import { collectVirtualAvatar, submitFiling, refreshFiling } from "@/api/filing";
+import type { FilingStatus, VirtualAvatar } from "@/api/filing";
 import { addToLibrary, moveLibraryItem, removeLibraryItem } from "@/api/asset-library";
 import type { FolderDto, LibraryItemDto } from "@/api/asset-library/type";
 import { LibraryAssetCard } from "@/components/assets/asset-card";
@@ -30,6 +32,7 @@ import { Button } from "@/components/ui/button";
 import { useAssetFolders } from "@/hooks/use-asset-folders";
 import { useAssetLibrary } from "@/hooks/use-asset-library";
 import { useAssetUploads } from "@/hooks/use-asset-uploads";
+import { useVirtualAvatars } from "@/hooks/use-virtual-avatars";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { cn } from "@/lib/utils";
 import { moveInLibrary, removeFromLibrary, type LibraryApi } from "@/utils/assets/library-actions";
@@ -63,6 +66,13 @@ export function LibraryView({
   const folders = useAssetFolders(true);
   const { list, state } = useAssetLibrary(folder, q);
   const { items } = state;
+  // 虚拟人像库归集状态：给每张资产库图片显示备案角标
+  const avatarLib = useVirtualAvatars();
+  const avatarByAssetId = useMemo(() => {
+    const map = new Map<string, VirtualAvatar>();
+    for (const v of avatarLib.items) if (v.assetId) map.set(v.assetId, v);
+    return map;
+  }, [avatarLib.items]);
   const currentFolder: FolderDto | null =
     (folder && folders.folders?.find((entry) => entry.id === folder)) || null;
 
@@ -127,6 +137,37 @@ export function LibraryView({
     folders.adjust(item.folderId, -1);
     folders.reload();
     toast.success("已移出资产库");
+  };
+
+  /**
+   * 备案角标点击：这张图若未归集，先归集（来源=个人资产库）再提交备案；
+   * 已归集则按状态提交 / 重试 / 刷新。source_ref 用资产 ID，保证跨文件夹唯一。
+   */
+  const onFilingClick = async (item: LibraryItemDto) => {
+    try {
+      const existing = avatarByAssetId.get(item.asset.id);
+      if (existing?.filingStatus === "active" || existing?.filingStatus === "pending") {
+        const next = await refreshFiling(existing.id);
+        avatarLib.update(next);
+        toast.success(next.filingStatus === "active" ? "已备案" : "状态已刷新");
+        return;
+      }
+      const collected =
+        existing ??
+        (await collectVirtualAvatar({
+          source_type: "library_asset",
+          source_ref: `library:${item.asset.id}`,
+          asset_id: item.asset.id,
+          url: item.asset.url,
+          name: item.asset.fileName ?? "未命名人像",
+        }));
+      avatarLib.update(collected);
+      const next = await submitFiling(collected.id, collected.filingModelKey);
+      avatarLib.update(next);
+      toast.success("已提交备案");
+    } catch {
+      // 请求层已弹提示
+    }
   };
 
   /** 移动；失败（请求层已弹提示，列表已回滚）抛出，让选择器保持打开 */
@@ -254,6 +295,10 @@ export function LibraryView({
                 onPreview={() => setPreviewId(item.asset.id)}
                 onMove={() => setMoving(item)}
                 onRemove={() => void remove(item)}
+                filingStatus={
+                  avatarByAssetId.get(item.asset.id)?.filingStatus as FilingStatus | undefined
+                }
+                onFiling={() => void onFilingClick(item)}
               />
             ))}
           </AssetMasonry>

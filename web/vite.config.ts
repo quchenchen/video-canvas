@@ -9,6 +9,11 @@ const proxyTarget = process.env.VITE_PROXY_TARGET ?? "http://localhost:8080";
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react(), tailwindcss()],
+  build: {
+    // 产物目录不能叫 assets：业务路由 /assets（资产库）会命中物理目录，
+    // nginx 走目录索引直接 403（刷新 /assets?tab=library 就白屏）。
+    assetsDir: "static",
+  },
   server: {
     proxy: {
       // 开发时 VITE_API_BASE_URL 用相对地址 /api/v1，请求与 WebSocket 都走这条代理，

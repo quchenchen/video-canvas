@@ -16,6 +16,7 @@
 # 前端依赖与构建产物
 /web/node_modules/
 /web/dist/
+/web/.env.local
 
 # IDE
 /.idea/
@@ -29,3 +30,9 @@
 .traces/
 
 .claude/worktrees/
+
+# 本地主密钥（生产同步，含真实凭据，永不入库）
+/backend/.ai-secret-key.local
+
+# 项目记忆与本地工作区数据
+/.workbuddy/

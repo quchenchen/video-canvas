@@ -17,7 +17,9 @@ import {
   type LucideIcon,
 } from "lucide-react";
 
+import type { FilingDto } from "@/api/filing";
 import { MediaPreview } from "@/components/canvas/media-preview";
+import { FilingButton } from "@/components/drama/filing-button";
 import { DramaPoster } from "@/components/drama/poster";
 import { Button } from "@/components/ui/button";
 import { DURATION, STAGGER, STAGGER_MAX, TAP_CARD } from "@/lib/motion";
@@ -139,6 +141,8 @@ export function AssetCard({
   onLocate,
   onEditPrompt,
   onEditCharacter,
+  filing,
+  onFilingUpdate,
   onUpload,
   onPickLibrary,
 }: {
@@ -152,6 +156,9 @@ export function AssetCard({
   onEditPrompt: () => void;
   /** 打开角色卡详情（角色名、形象、补充图、音色） */
   onEditCharacter: () => void;
+  /** 真人备案记录（仅角色卡有） */
+  filing?: FilingDto;
+  onFilingUpdate?: (f: FilingDto) => void;
   /** 选本地文件放进这张空卡 */
   onUpload?: () => void;
   /** 从素材库选一个放进这张空卡 */
@@ -279,6 +286,9 @@ export function AssetCard({
             >
               <PencilLine />
             </Button>
+          )}
+          {item.type === "character" && item.data.assetId && filing && onFilingUpdate && (
+            <FilingButton filing={filing} onUpdate={onFilingUpdate} />
           )}
           {item.type === "character" && (
             <Button

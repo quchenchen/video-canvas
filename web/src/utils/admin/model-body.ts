@@ -211,6 +211,42 @@ export const MODEL_TAG_MAX_LENGTH = 12;
 export const readModelBool = (body: unknown, field: string) =>
   isRecord(body) && body[field] === true;
 
+/**
+ * 虚拟人像库配置：正文 capabilities.filing（默认关闭）。
+ * site 仅为兼容旧配置读取而保留；备案站点实际由后端按渠道 base_url 自动推断，UI 不再写入。
+ */
+export type ModelFilingValue = {
+  enabled: boolean;
+  site: string;
+  group_id: string;
+  project_name: string;
+};
+export const readModelFiling = (body: unknown): ModelFilingValue => {
+  const caps = isRecord(body) && isRecord(body.capabilities) ? body.capabilities : null;
+  const raw = caps && isRecord(caps.filing) ? caps.filing : {};
+  return {
+    enabled: raw.enabled === true,
+    site: typeof raw.site === "string" && raw.site ? raw.site : "ark_cn",
+    group_id: typeof raw.group_id === "string" ? raw.group_id : "",
+    project_name: typeof raw.project_name === "string" ? raw.project_name : "",
+  };
+};
+
+/** 改 capabilities.filing，其余字段与键顺序不动。 */
+export function withModelFiling(
+  body: unknown,
+  value: ModelFilingValue,
+): Record<string, unknown> | null {
+  if (!isRecord(body)) return null;
+  const capabilities = isRecord(body.capabilities) ? { ...body.capabilities } : {};
+  capabilities.filing = {
+    enabled: value.enabled,
+    group_id: value.group_id,
+    project_name: value.project_name,
+  };
+  return { ...body, capabilities };
+}
+
 /** 时限格式（Go 的 time.Duration 写法，如 30m、1h30m、90s）；通过返回 null，前端只校验格式 */
 export function checkDeadline(value: string): string | null {
   const text = value.trim();

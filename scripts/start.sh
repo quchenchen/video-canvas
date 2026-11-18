@@ -9,6 +9,12 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BACKEND_DIR="$ROOT/backend"
 WEB_DIR="$ROOT/web"
 
+# 凭证主密钥：只通过环境变量提供。本机若存在从生产同步的密钥文件则自动加载（该文件已被 gitignore 排除）。
+# 注意：没有它，任何渠道 Key 都无法解密，生成任务会报 secret_unavailable / “平台繁忙”。
+if [ -f "$BACKEND_DIR/.ai-secret-key.local" ]; then
+  export APP_AI_SECRET_KEY="$(cat "$BACKEND_DIR/.ai-secret-key.local")"
+fi
+
 # 配置文件：优先用本机的 config.local.yaml（已被 gitignore），没有就用默认配置
 if [ -f "$BACKEND_DIR/configs/config.local.yaml" ]; then
   CONFIG="configs/config.local.yaml"
