@@ -155,12 +155,18 @@ func NewApp(cfg *config.Config) (*App, error) {
 		closeDB(db)
 		return nil, err
 	}
+	// 虚拟人像库备案：备案结果（方舟 asset id）要在生成任务里换成 asset:// 引用，
+	// 因此提前构造，同时注入插件执行器与路由，两处共用一个实例。
+	filingSvc := service.NewFilingService(
+		repository.NewVirtualAvatarRepository(db), aiConfigRepo, aiCfgSvc, aiChannelRepo, aiChannelRepo, assetSvc,
+	)
 	executor := plugin.New(plugin.Options{
 		Runner:    runnerClient,
 		Codes:     pluginCodeStore{repo: aiPluginRepo},
 		Secrets:   aiCfgSvc,
 		Assets:    assetSvc,
 		Saver:     assetSvc,
+		AssetURIs: filingSvc,
 		IPAllowed: outboundIPPolicy(cfg),
 	})
 
@@ -388,6 +394,7 @@ func NewApp(cfg *config.Config) (*App, error) {
 			Assets: assetRepo, Canvases: canvasProjectRepo, Views: assetSvc,
 		})),
 		Files:        handler.NewFilesHandler(assetSvc),
+		Filing:       handler.NewFilingHandler(filingSvc),
 		AIModel:      handler.NewAIModelHandler(aiCfgSvc),
 		AdminAI:      handler.NewAdminAIHandler(aiCfgSvc),
 		AdminCatalog: handler.NewAdminCatalogHandler(service.NewAICatalogService(aiChannelSvc, aiPluginSvc, aiCfgSvc)),

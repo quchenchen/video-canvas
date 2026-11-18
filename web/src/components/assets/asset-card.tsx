@@ -7,10 +7,13 @@ import {
   Library,
   Music2,
   Unlink,
+  UserRoundPlus,
 } from "lucide-react";
 
 import type { AssetDto } from "@/api/asset/type";
 import type { GeneratedItemDto, LibraryItemDto } from "@/api/asset-library/type";
+import type { FilingStatus } from "@/api/filing";
+import { filingMeta } from "@/components/drama/filing-status";
 import { MediaPreview, VideoPoster } from "@/components/canvas/media-preview";
 import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import { TAP_CARD } from "@/lib/motion";
@@ -258,6 +261,9 @@ export function LibraryAssetCard({
   onPreview,
   onMove,
   onRemove,
+  onFiling,
+  onAddToAvatars,
+  filingStatus,
   select,
   natural,
 }: {
@@ -266,11 +272,19 @@ export function LibraryAssetCard({
   onPreview?: () => void;
   onMove?: () => void;
   onRemove?: () => void;
+  /** 备案角标点击：未备案提交 / 已备案刷新 / 失败重试，由调用方决定 */
+  onFiling?: () => void;
+  /** 加入虚拟人像库；不传则不显示该菜单项 */
+  onAddToAvatars?: () => void;
+  /** 备案状态，仅图片显示角标 */
+  filingStatus?: FilingStatus;
   select?: CardSelect;
 }) {
   const { asset } = item;
   const name = asset.fileName ?? "未命名";
   const duration = asset.kind === "image" ? null : formatMediaDuration(asset.durationMs);
+  const meta = filingMeta(filingStatus);
+  const FilingIcon = meta.Icon;
 
   return (
     <motion.div
@@ -298,19 +312,48 @@ export function LibraryAssetCard({
           {duration}
         </span>
       )}
+      {!select && asset.kind === "image" && onFiling && (
+        <button
+          type="button"
+          aria-label={meta.label}
+          title={meta.label}
+          onClick={(e) => {
+            e.stopPropagation();
+            onFiling();
+          }}
+          className={cn(
+            CHIP,
+            "absolute top-2 left-2 flex size-8 items-center justify-center rounded-full p-0",
+            meta.tone,
+            meta.spin && "animate-spin",
+          )}
+        >
+          <FilingIcon className="size-4" />
+        </button>
+      )}
       <span className="from-cover-scrim text-cover-foreground pointer-events-none absolute inset-x-0 bottom-0 bg-linear-to-t to-transparent px-2.5 pt-7 pb-2 text-xs">
         <span className="block truncate font-medium">{name}</span>
       </span>
-      {!select && onMove && onRemove && (
+      {!select && (onMove || onRemove || onAddToAvatars) && (
         <CardMenu>
-          <DropdownMenuItem onClick={onMove}>
-            <FolderInput />
-            移动到…
-          </DropdownMenuItem>
-          <DropdownMenuItem onClick={onRemove}>
-            <Unlink />
-            移出资产库
-          </DropdownMenuItem>
+          {onAddToAvatars && asset.kind === "image" && (
+            <DropdownMenuItem onClick={onAddToAvatars}>
+              <UserRoundPlus />
+              加入虚拟人像库
+            </DropdownMenuItem>
+          )}
+          {onMove && (
+            <DropdownMenuItem onClick={onMove}>
+              <FolderInput />
+              移动到…
+            </DropdownMenuItem>
+          )}
+          {onRemove && (
+            <DropdownMenuItem onClick={onRemove}>
+              <Unlink />
+              移出资产库
+            </DropdownMenuItem>
+          )}
         </CardMenu>
       )}
     </motion.div>

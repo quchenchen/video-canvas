@@ -34,6 +34,7 @@ type Handlers struct {
 	WS             *handler.WSHandler                  // 用户级 WebSocket 推送
 	Asset          *handler.AssetHandler               // 素材上传与查询
 	AssetLibrary   *handler.AssetLibraryHandler        // 资产库：文件夹、库归属、生成历史
+	Filing         *handler.FilingHandler              // 虚拟人像库：归集与方舟备案
 	Drama          *handler.DramaHandler               // 短剧项目、分集剧本、资产流水线
 	DramaSegment   *handler.DramaSegmentHandler        // 分集片段编辑、排序与视频/首帧生成
 	Files          gin.HandlerFunc                     // 素材稳定地址 /files/*：本地存储直出，对象存储签名后 302
@@ -191,6 +192,13 @@ func New(mode, jwtSecret string, h Handlers) *gin.Engine {
 		auth.PATCH("/asset-library/items/:id", h.AssetLibrary.MoveItem)
 		auth.DELETE("/asset-library/items/:id", h.AssetLibrary.RemoveItem)
 
+		// 虚拟人像库：归集两类来源的角色图片并做方舟备案；id 是十六进制串。
+		auth.GET("/virtual-avatars", h.Filing.List)
+		auth.POST("/virtual-avatars", h.Filing.Collect)
+		auth.DELETE("/virtual-avatars/:id", h.Filing.Remove)
+		auth.POST("/virtual-avatars/:id/submit", h.Filing.Submit)
+		auth.POST("/virtual-avatars/:id/refresh", h.Filing.Refresh)
+
 		// 营销工作室：项目、轮次、环节运行、脚本的 id 都是十六进制串；别人的资源一律按「不存在」处理。
 		auth.GET("/marketing/options", h.Marketing.Options)
 		auth.POST("/marketing/quote", h.Marketing.Quote)
@@ -317,6 +325,9 @@ func New(mode, jwtSecret string, h Handlers) *gin.Engine {
 		models.POST("/:key/test-run", h.AdminAI.TestRun)
 		models.PUT("/:key/enabled", h.AdminAI.SetEnabled)
 		models.PUT("/:key/sort", h.AdminAI.SetSort)
+		// 模型的虚拟人像库备案凭据（AK/SK），只写不读。
+		models.PUT("/:key/filing/access-key", superOnly, h.AdminAI.SetFilingSecret)
+		models.PUT("/:key/filing/secret-key", superOnly, h.AdminAI.SetFilingSecretKey)
 		models.GET("/:key/delete-check", h.AdminAI.DeleteCheck)
 		models.DELETE("/:key", h.AdminAI.Delete)
 

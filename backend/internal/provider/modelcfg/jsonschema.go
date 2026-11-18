@@ -94,6 +94,11 @@ func capabilitiesSchema() obj {
 		"vision":        obj{"type": "boolean", "description": "能不能看图（仅 agent）：不能看图的模型不会收到「看图」工具"},
 		"video":         obj{"type": "boolean", "description": "能不能理解视频画面和声音（仅 Gemini 格式的 agent）"},
 		"prompt_format": obj{"type": "string", "enum": []string{"", PromptFormatSeedance, PromptFormatH3}, "description": "视频模型的提示词写法（仅 video）：短剧分镜据此选模板。留空 = 通用；seedance = 即梦 / Seedance；h3 = MiniMax H3"},
+		"filing": object("虚拟人像库备案（仅 video）：备案站点由该模型渠道的 base_url 自动推断，不手填", obj{
+			"enabled":      boolean("是否开启虚拟人像库备案"),
+			"group_id":     str("方舟素材组 ID（CreateAsset 的 GroupId）"),
+			"project_name": str("方舟项目名，留空用 default"),
+		}),
 	}, "prompt")
 }
 

@@ -60,6 +60,17 @@ type Capabilities struct {
 	Video   bool         `json:"video,omitempty"`   // 能不能理解视频画面和声音，仅 Gemini 格式的 agent
 	// PromptFormat 是视频模型的提示词写法，短剧分镜据此选模板：空 = 通用，seedance，h3；仅 video
 	PromptFormat string `json:"prompt_format,omitempty"`
+	// Filing 是视频模型的虚拟人像库备案配置；备案站点不在这里手选，由渠道 base_url 自动推断。
+	Filing *FilingSpec `json:"filing,omitempty"`
+}
+
+// FilingSpec 是虚拟人像库备案配置（仅 video）。
+// Site 历史字段保留兼容读取，保存后由后端按渠道 base_url 覆盖，前端不再手选。
+type FilingSpec struct {
+	Enabled     bool   `json:"enabled,omitempty"`
+	GroupID     string `json:"group_id,omitempty"`
+	ProjectName string `json:"project_name,omitempty"`
+	Site        string `json:"site,omitempty"`
 }
 
 // 视频模型的提示词写法（Capabilities.PromptFormat 的取值；空串 = 通用）。

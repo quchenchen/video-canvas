@@ -296,6 +296,7 @@ export function ModelDialog({
                     body={body}
                     issues={ws.fieldIssues}
                     warnings={ws.fieldWarnings}
+                    modelKey={ws.modelKey}
                     onChange={ws.editBody}
                   />
                 ) : (

@@ -294,3 +294,33 @@ func (h *AdminAIHandler) Delete(c *gin.Context) {
 	}
 	response.OK(c, nil)
 }
+
+// SetFilingSecret 设置某个模型的虚拟人像库备案 Access Key（只写，不回显）。
+func (h *AdminAIHandler) SetFilingSecret(c *gin.Context) {
+	h.setFilingCredential(c, true)
+}
+
+// SetFilingSecretKey 设置某个模型的虚拟人像库备案 Secret Key（只写，不回显）。
+func (h *AdminAIHandler) SetFilingSecretKey(c *gin.Context) {
+	h.setFilingCredential(c, false)
+}
+
+func (h *AdminAIHandler) setFilingCredential(c *gin.Context, isAK bool) {
+	key, ok := pathKey(c)
+	if !ok {
+		return
+	}
+	var req setSecretReq
+	if !BindJSON(c, &req) {
+		return
+	}
+	name := model.FilingSecretKeyName(key)
+	if isAK {
+		name = model.FilingSecretName(key)
+	}
+	if err := h.svc.SetSecret(c.Request.Context(), name, req.Value, currentUserID(c)); err != nil {
+		response.Fail(c, err)
+		return
+	}
+	response.OK(c, nil)
+}

@@ -19,6 +19,7 @@ import { MediaLightbox, type LightboxTarget } from "@/components/canvas/media-li
 import { ModelMenu } from "@/components/canvas/model-menu";
 import { PANEL_CHIP_CLASS } from "@/components/canvas/node-prompt-input";
 import { toggleVoice, useVoicePlaying } from "@/components/characters/voice-player";
+import { FilingPanel } from "@/components/drama/filing-panel";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -290,6 +291,7 @@ export function CharacterDetailDialog({
               )}
             </div>
 
+            <FilingPanel assetId={data.assetId} src={data.src} name={name} />
             <div className="flex flex-col gap-2">
               <div className="flex h-8 items-center gap-1">
                 <span className={LABEL}>补充图</span>

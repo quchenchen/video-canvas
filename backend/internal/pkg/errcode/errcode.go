@@ -104,6 +104,13 @@ var (
 	ErrPluginOpFailed     = New(50022, "插件调用失败", http.StatusBadGateway)   // 历史：连通性检查 / 导入失败，原因写进 Msg（已脱敏）
 	ErrChannelPullFailed  = New(50023, "拉取上游模型失败", http.StatusBadGateway) // 上游不通 / 401 / 返回格式不符 / 超时，原因写进 Msg（已脱敏）
 	ErrModelEnabled       = New(50031, "模型还在上线，先下线再删除", http.StatusConflict)
+
+	// 虚拟人像库备案 57xxx
+	ErrFilingDisabled    = New(57001, "该模型未开启虚拟人像库备案", http.StatusConflict)
+	ErrFilingNoModel     = New(57002, "请先指定一个开启了虚拟人像库的视频模型", http.StatusBadRequest)
+	ErrFilingSecretUnset = New(57003, "该模型的备案 AK/SK 尚未配置", http.StatusConflict)
+	ErrFilingUpstream    = New(57004, "方舟备案接口调用失败", http.StatusBadGateway)
+	ErrFilingExists      = New(57005, "该角色图片已归集到虚拟人像库", http.StatusConflict)
 )
 
 // 存储配置 / 浏览器直传 51xxx

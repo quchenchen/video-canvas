@@ -244,6 +244,24 @@ func (r *AIConfigRepository) LoadModels(ctx context.Context) ([]PublishedModel, 
 	return list, err
 }
 
+// PublishedModelByKey 精确取一个模型的已发布配置（含 body）。不存在（没有发布版本）返回 ErrNotFound。
+// filing service 用它读模型配置里的 filing 段（开关 / 站点 / 素材组 / 项目名）。
+func (r *AIConfigRepository) PublishedModelByKey(ctx context.Context, key string) (*PublishedModel, error) {
+	var row PublishedModel
+	err := r.db.WithContext(ctx).Table("ai_models AS m").
+		Select("m.key AS key, m.kind AS kind, m.enabled AS enabled, m.sort AS sort, "+
+			"r.id AS revision_id, r.revision_no AS revision_no, r.body_json AS body").
+		Joins("JOIN ai_config_revisions AS r ON r.id = m.published_revision_id").
+		Where("m.key = ?", key).Scan(&row).Error
+	if err != nil {
+		return nil, err
+	}
+	if row.Key == "" {
+		return nil, ErrNotFound
+	}
+	return &row, nil
+}
+
 // UpsertSecret 写入或覆盖凭证密文（只写；按 name 冲突更新）。
 func (r *AIConfigRepository) UpsertSecret(ctx context.Context, s *model.AISecret) error {
 	return r.db.WithContext(ctx).Clauses(clause.OnConflict{
