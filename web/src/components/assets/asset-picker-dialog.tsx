@@ -42,15 +42,22 @@ import type { TimeRange } from "@/utils/assets/time-range";
 
 import { AssetCover } from "./asset-card";
 import { AssetKindTabs } from "./asset-kind-tabs";
-import { HistoryPane, HumansPane, LibraryPane, type PickRules } from "./asset-picker-panes";
+import {
+  HistoryPane,
+  HumansPane,
+  LibraryPane,
+  OfficialPane,
+  type PickRules,
+} from "./asset-picker-panes";
 import { AssetSearch } from "./asset-search";
 import { FilterMenu } from "./filter-menu";
 
-/** 来源切换的选项；真人库只在调用方开启（角色卡选图）时出现 */
+/** 来源切换的选项；真人库只在调用方开启（角色卡选图）时出现，音色库只在调用方开启（画布素材库、选音色音频）时出现 */
 const SOURCE_OPTIONS: { value: PickerSource; label: string }[] = [
   { value: "library", label: "个人资产库" },
   { value: "history", label: "生成历史" },
   { value: "humans", label: "真人库" },
+  { value: "official", label: "音色库" },
 ];
 
 /** 「时间」图标按钮的选项 */
@@ -97,11 +104,13 @@ export type AssetPickerOptions = {
   confirmLabel?: string;
   /** 显示「真人库」来源（只有图片）：只给角色卡选主图 / 补充图用，画布的「从资产库添加」不显示 */
   withHumans?: boolean;
+  /** 显示「音色库」来源（只有音频）：给角色卡选音色、画布选参考音频用 */
+  withOfficialVoices?: boolean;
 };
 
 /**
  * 画布里的资产库弹框（设计文档 §6.2）：从「个人资产库」或「生成历史」多选素材，确认后交给画布建节点；
- * 角色卡选图时（withHumans）还多一个「真人库」来源。
+ * 角色卡选图时（withHumans）还多一个「真人库」来源，选音频时（withOfficialVoices）多一个「音色库」来源。
  * 顶部来源切换，第二行搜索，生成历史来源还有类型标签（下划线选中态）；生成历史来源有「时间」「筛选」图标按钮，
  * 个人资产库来源有「上传」（文件归入当前所在文件夹，传完自动勾选并切到该类型标签）。
  * 一次最多选 20 个，满了其余卡片禁用并提示。每次打开都从初始状态开始。手机宽度全屏。
@@ -146,6 +155,7 @@ function PickerBody({
   reasonOf,
   confirmLabel = "确认",
   withHumans = false,
+  withOfficialVoices = false,
   onConfirm,
 }: AssetPickerOptions & { onConfirm: (assets: AssetDto[]) => void }) {
   const rules = useMemo<PickRules>(() => ({ limit, reasonOf }), [limit, reasonOf]);
@@ -215,9 +225,10 @@ function PickerBody({
   const summary = describeSelection(selected, limit);
   const library = view.source === "library";
   const humans = view.source === "humans";
-  const sourceOptions = withHumans
-    ? SOURCE_OPTIONS
-    : SOURCE_OPTIONS.filter((o) => o.value !== "humans");
+  const official = view.source === "official";
+  const sourceOptions = SOURCE_OPTIONS.filter(
+    (o) => (withHumans || o.value !== "humans") && (withOfficialVoices || o.value !== "official"),
+  );
 
   return (
     <>
@@ -234,9 +245,17 @@ function PickerBody({
             <AssetSearch
               value={input}
               onChange={setInput}
-              placeholder={library ? "搜索文件名" : humans ? "搜索真人名称" : "搜索提示词"}
+              placeholder={
+                library
+                  ? "搜索文件名"
+                  : humans
+                    ? "搜索真人名称"
+                    : official
+                      ? "搜索音色名称"
+                      : "搜索提示词"
+              }
             />
-            {humans ? null : library ? (
+            {humans || official ? null : library ? (
               <button
                 type="button"
                 onClick={() => fileInput.current?.click()}
@@ -301,7 +320,9 @@ function PickerBody({
         key={view.source}
         className="animate-in fade-in-0 flex min-h-0 flex-1 flex-col overflow-y-auto px-5 pt-3 pb-4 duration-150 [scrollbar-width:thin] motion-reduce:animate-none [&>*]:shrink-0"
       >
-        {humans ? (
+        {official ? (
+          <OfficialPane q={q} selected={selected} rules={rules} onToggle={toggle} />
+        ) : humans ? (
           <HumansPane q={q} selected={selected} rules={rules} onToggle={toggle} />
         ) : library ? (
           <LibraryPane

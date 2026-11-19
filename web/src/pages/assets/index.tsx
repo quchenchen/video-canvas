@@ -13,9 +13,10 @@ import {
 import { HistoryView } from "./history-view";
 import { HumansView } from "./humans-view";
 import { LibraryView } from "./library-view";
+import { OfficialView } from "./official-view";
 
 /** 范围从左到右的顺序，决定切换时内容滑入的方向 */
-const TAB_ORDER: readonly AssetsTab[] = ["history", "library", "humans"];
+const TAB_ORDER: readonly AssetsTab[] = ["history", "library", "official", "humans"];
 
 /**
  * 资产页（设计稿 docs/design/资产库）：大标题旁是「生成历史 / 个人资产库 / 真人库」三个范围。
@@ -55,6 +56,7 @@ export default function AssetsPage() {
           options={[
             { value: "history", label: "生成历史" },
             { value: "library", label: "个人资产库" },
+            { value: "official", label: "音色库" },
             { value: "humans", label: "真人库" },
           ]}
         />
@@ -71,6 +73,7 @@ export default function AssetsPage() {
           {route.tab === "library" && (
             <LibraryView folder={route.folder} onFolderChange={changeFolder} />
           )}
+          {route.tab === "official" && <OfficialView />}
           {route.tab === "humans" && <HumansView />}
         </motion.div>
       </MotionConfig>

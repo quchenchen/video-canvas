@@ -159,14 +159,17 @@ export function CharacterCanvasNode({
   );
 }
 
-/** 声音格里的音频试听：圆形按钮，点一下播放 / 暂停（全站同一时刻只放一条） */
-function AudioCell({ asset, title }: { asset: AssetDto; title: string }) {
+/** 声音格里的音频试听：点一下播放 / 暂停（全站同一时刻只放一条）。绑了有名字的音色时，格子里直接写出名字。 */
+function AudioCell({ asset, name }: { asset: AssetDto; name?: string }) {
   const playing = useVoicePlaying(asset.id);
+  const label = name?.trim() ?? "";
   return (
     <button
       type="button"
-      title={title}
-      aria-label={playing ? "暂停试听" : "试听声音"}
+      title={label ? `${label}（点击试听 / 暂停）` : "点击试听 / 暂停"}
+      aria-label={
+        playing ? `暂停试听${label ? `：${label}` : ""}` : `试听声音${label ? `：${label}` : ""}`
+      }
       aria-pressed={playing}
       onClick={(event) => {
         event.stopPropagation();
@@ -174,10 +177,12 @@ function AudioCell({ asset, title }: { asset: AssetDto; title: string }) {
       }}
       onPointerDown={(event) => event.stopPropagation()}
       className={cn(
-        "focus-visible:ring-ring/60 bg-info/15 text-info grid size-9 shrink-0 place-items-center rounded-[10px] outline-none focus-visible:ring-2 [&_svg]:size-4",
+        "focus-visible:ring-ring/60 bg-info/15 text-info flex h-9 min-w-9 shrink-0 items-center gap-1.5 rounded-[10px] px-2 outline-none focus-visible:ring-2 [&_svg]:size-4 [&_svg]:shrink-0",
+        !label && "w-9 justify-center px-0",
       )}
     >
       {playing ? <Pause /> : <Play />}
+      {label && <span className="max-w-24 truncate text-[11px] leading-none">{label}</span>}
     </button>
   );
 }
@@ -306,7 +311,7 @@ function CharacterNodeBody({
           {cell.kind === "audio" && character.voice ? (
             <AudioCell
               asset={{ id: character.voice.assetId, url: character.voice.src } as AssetDto}
-              title={cell.title}
+              name={character.voice.name}
             />
           ) : (
             <button

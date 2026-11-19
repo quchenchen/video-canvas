@@ -50,8 +50,9 @@ type ChannelSnapshot struct {
 	PluginKey       string            `json:"plugin_key"`        // 模型选的插件
 	PluginVersionID uint64            `json:"plugin_version_id"` // 模型固定的插件版本（取插件代码用）
 	BaseURL         string            `json:"base_url"`
-	Headers         map[string]string `json:"headers,omitempty"`  // 渠道自定义请求头，只加到发往 base_url 同源的请求
-	Settings        map[string]any    `json:"settings,omitempty"` // 模型的协议设置项取值
+	VoiceScope      string            `json:"voice_scope,omitempty"` // 公开素材资源域声明（ark-cn / byteplus），空表示按 BaseURL 推断
+	Headers         map[string]string `json:"headers,omitempty"`     // 渠道自定义请求头，只加到发往 base_url 同源的请求
+	Settings        map[string]any    `json:"settings,omitempty"`    // 模型的协议设置项取值
 	RateLimit       RateLimit         `json:"rate_limit"`
 }
 
@@ -99,7 +100,7 @@ func AgentRuntimeOf(ch *model.AIChannel) (*ChannelRuntime, error) {
 // channelSnapshotOf 由渠道行取出快照里的渠道部分（地址、请求头、限流）；协议相关的字段由调用方补。
 // 渠道的 headers / rate_limit 正文解析失败返回错误。
 func channelSnapshotOf(ch *model.AIChannel) (*ChannelSnapshot, error) {
-	cs := ChannelSnapshot{Key: ch.Key, BaseURL: ch.BaseURL}
+	cs := ChannelSnapshot{Key: ch.Key, BaseURL: ch.BaseURL, VoiceScope: ch.VoiceScope}
 	if len(ch.HeadersJSON) > 0 {
 		if err := json.Unmarshal(ch.HeadersJSON, &cs.Headers); err != nil {
 			return nil, fmt.Errorf("渠道 %s 的 headers 不是合法的 JSON 对象：%w", ch.Key, err)

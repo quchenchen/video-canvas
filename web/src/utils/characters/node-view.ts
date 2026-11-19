@@ -90,5 +90,6 @@ export type VoiceCell =
 export function voiceCell(character: NodeCharacter, generating = false): VoiceCell {
   if (generating) return { kind: "generating", title: "声音生成中…" };
   if (!character.voice) return { kind: "none", title: "还没有声音，点开详情设置" };
-  return { kind: "audio", title: "声音" };
+  // 有名字就显示名字（绑定时记下来的音色名），老数据没有名字时退回「声音」
+  return { kind: "audio", title: character.voice.name?.trim() || "声音" };
 }

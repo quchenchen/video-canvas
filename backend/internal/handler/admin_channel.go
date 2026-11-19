@@ -24,22 +24,24 @@ func NewAdminChannelHandler(svc *service.AIChannelService, ai *service.AIConfigS
 // createChannelReq 新建渠道。key 格式、base_url、headers、rate_limit 的业务规则由 service 校验（返回 50013 并说明原因），
 // 这里只拦“没传”和明显超长。
 type createChannelReq struct {
-	Key       string             `json:"key" binding:"omitempty,max=64" label:"key"` // 不传由后端生成
-	Name      string             `json:"name" binding:"required,max=128" label:"name"`
-	BaseURL   string             `json:"base_url" binding:"required,max=512" label:"base_url"`
-	Headers   map[string]string  `json:"headers"`
-	RateLimit provider.RateLimit `json:"rate_limit"`
-	Enabled   *bool              `json:"enabled"` // 不传按 true
+	Key        string             `json:"key" binding:"omitempty,max=64" label:"key"` // 不传由后端生成
+	Name       string             `json:"name" binding:"required,max=128" label:"name"`
+	BaseURL    string             `json:"base_url" binding:"required,max=512" label:"base_url"`
+	Headers    map[string]string  `json:"headers"`
+	RateLimit  provider.RateLimit `json:"rate_limit"`
+	Enabled    *bool              `json:"enabled"`                                                    // 不传按 true
+	VoiceScope string             `json:"voice_scope" binding:"omitempty,max=32" label:"voice_scope"` // 公开素材资源域，取值由 service 校验
 }
 
 // updateChannelReq 更新渠道：字段都可选，不传表示不改；headers 传了（含空对象）就整体替换。
 type updateChannelReq struct {
-	Name      *string              `json:"name" binding:"omitempty,max=128" label:"name"`
-	BaseURL   *string              `json:"base_url" binding:"omitempty,max=512" label:"base_url"`
-	Headers   map[string]string    `json:"headers"`
-	RateLimit *provider.RateLimit  `json:"rate_limit"`
-	Enabled   *bool                `json:"enabled"`
-	Filing    *model.ChannelFiling `json:"filing"` // 虚拟人像库配置；传了就整体替换，素材组 ID 等规则由 service 校验
+	Name       *string              `json:"name" binding:"omitempty,max=128" label:"name"`
+	BaseURL    *string              `json:"base_url" binding:"omitempty,max=512" label:"base_url"`
+	Headers    map[string]string    `json:"headers"`
+	RateLimit  *provider.RateLimit  `json:"rate_limit"`
+	Enabled    *bool                `json:"enabled"`
+	Filing     *model.ChannelFiling `json:"filing"`                                                     // 虚拟人像库配置；传了就整体替换，素材组 ID 等规则由 service 校验
+	VoiceScope *string              `json:"voice_scope" binding:"omitempty,max=32" label:"voice_scope"` // 公开素材资源域；指向空串表示改回按 BaseURL 推断
 }
 
 // setFilingSecretReq 设置渠道虚拟人像库的 AK/SK：两项都必填（方舟签名同时要用）。
@@ -99,7 +101,7 @@ func (h *AdminChannelHandler) Create(c *gin.Context) {
 	}
 	view, err := h.svc.Create(c.Request.Context(), service.ChannelCreateInput{
 		Key: req.Key, Name: req.Name, BaseURL: req.BaseURL, Headers: req.Headers, RateLimit: req.RateLimit,
-		Enabled: enabled, ActorID: currentUserID(c),
+		Enabled: enabled, VoiceScope: req.VoiceScope, ActorID: currentUserID(c),
 	})
 	if err != nil {
 		response.Fail(c, err)
@@ -120,7 +122,7 @@ func (h *AdminChannelHandler) Update(c *gin.Context) {
 	}
 	view, err := h.svc.Update(c.Request.Context(), service.ChannelUpdateInput{
 		Key: key, Name: req.Name, BaseURL: req.BaseURL, Headers: req.Headers, RateLimit: req.RateLimit,
-		Enabled: req.Enabled, Filing: req.Filing, ActorID: currentUserID(c),
+		Enabled: req.Enabled, Filing: req.Filing, VoiceScope: req.VoiceScope, ActorID: currentUserID(c),
 	})
 	if err != nil {
 		response.Fail(c, err)

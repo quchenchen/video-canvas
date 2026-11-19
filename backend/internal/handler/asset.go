@@ -4,6 +4,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -102,6 +103,34 @@ func (h *AssetHandler) Get(c *gin.Context) {
 		return
 	}
 	response.OK(c, view)
+}
+
+// ListOfficial 官方参考音色列表：?kind=audio&offset=0&limit=100。
+// 官方音色是系统公共素材，所有登录用户可见，供资产页与参考音频选择器列出。
+func (h *AssetHandler) ListOfficial(c *gin.Context) {
+	offset, limit := 0, 100
+	if v := c.Query("offset"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 0 {
+			response.Fail(c, errcode.ErrInvalidParams.WithMsg("offset 不合法"))
+			return
+		}
+		offset = n
+	}
+	if v := c.Query("limit"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 1 || n > 100 {
+			response.Fail(c, errcode.ErrInvalidParams.WithMsg("limit 必须在 1 到 100 之间"))
+			return
+		}
+		limit = n
+	}
+	page, err := h.svc.ListOfficial(c.Request.Context(), c.Query("kind"), offset, limit)
+	if err != nil {
+		response.Fail(c, err)
+		return
+	}
+	response.OK(c, page)
 }
 
 // uploadIntentReq 是申请直传的参数。

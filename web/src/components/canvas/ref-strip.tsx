@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import { Link2, Loader2, Play, Plus, Upload, X } from "lucide-react";
+import { Link2, Loader2, Music2, Play, Plus, Upload, X } from "lucide-react";
 
 import { uploadAsset } from "@/api/asset";
+import type { AssetDto } from "@/api/asset/type";
 import type { RefKind } from "@/api/model/type";
 import {
   DropdownMenu,
@@ -11,6 +12,9 @@ import {
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useLocateNode } from "@/components/canvas-editor/use-focus-node";
@@ -19,6 +23,7 @@ import { cn } from "@/lib/utils";
 import type { ParamAsset } from "@/types";
 import type { RefKey } from "@/utils/tasks/capabilities";
 
+import { OfficialVoiceMenuContent, useOfficialVoices } from "./official-voice-picker";
 import { RefThumb, usePromptRefs, type RefSource } from "./prompt-mention";
 import { RefPeek } from "./use-ref-peek";
 
@@ -104,6 +109,7 @@ export function RefStrip({
   onUnlink,
   uploadKinds,
   onUpload,
+  officialVoice,
   onRemoveManual,
   errors,
   notices = [],
@@ -118,6 +124,11 @@ export function RefStrip({
   onUnlink: (sourceId: string) => void;
   uploadKinds: UploadKind[];
   onUpload: (key: RefKey, assetId: string | number, asset: ParamAsset) => void;
+  /** 模型支持参考音频时的 音色库入口；回调负责写进 audios 并切到收音频的生成方式 */
+  officialVoice?: {
+    onPick: (asset: AssetDto) => void;
+    disabled?: boolean;
+  };
   onRemoveManual: (key: RefKey, assetId: string) => void;
   /** 参考素材相关的校验错误 */
   errors: string[];
@@ -133,6 +144,7 @@ export function RefStrip({
   const [choices, setChoices] = useState<RefSource[]>([]);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const voices = useOfficialVoices();
 
   // 新连上的素材排在最后，滚到能看见它
   const count = items.length + manual.length;
@@ -281,7 +293,10 @@ export function RefStrip({
         <DropdownMenu
           modal={false}
           onOpenChange={(open) => {
-            if (open) setChoices(candidates());
+            if (open) {
+              setChoices(candidates());
+              if (officialVoice) voices.load();
+            }
           }}
         >
           <DropdownMenuTrigger
@@ -312,6 +327,24 @@ export function RefStrip({
                 </DropdownMenuItem>
               ))}
             </DropdownMenuGroup>
+            {officialVoice && (
+              <>
+                <DropdownMenuSeparator />
+                <DropdownMenuSub>
+                  <DropdownMenuSubTrigger disabled={disabled || officialVoice.disabled}>
+                    <Music2 />
+                    音色库
+                  </DropdownMenuSubTrigger>
+                  <DropdownMenuSubContent className="w-60">
+                    <OfficialVoiceMenuContent
+                      items={voices.items}
+                      loaded={voices.loaded}
+                      onPick={officialVoice.onPick}
+                    />
+                  </DropdownMenuSubContent>
+                </DropdownMenuSub>
+              </>
+            )}
             {uploadKinds.length > 0 && (
               <>
                 <DropdownMenuSeparator />

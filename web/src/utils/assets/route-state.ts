@@ -1,5 +1,5 @@
-/** 资产页的范围：生成历史、个人资产库、真人库（角色卡已改为画布内的节点，不再有资产页范围） */
-export type AssetsTab = "history" | "library" | "humans";
+/** 资产页的范围：生成历史、个人资产库、音色库、真人库（角色卡已改为画布内的节点，不再有资产页范围） */
+export type AssetsTab = "history" | "library" | "official" | "humans";
 
 /** 资产页放在地址栏里的状态：刷新、后退都能还原 */
 export type AssetsRoute = {
@@ -9,7 +9,7 @@ export type AssetsRoute = {
   folder: string | null;
 };
 
-const TABS: readonly AssetsTab[] = ["history", "library", "humans"];
+const TABS: readonly AssetsTab[] = ["history", "library", "official", "humans"];
 
 /** 文件夹 ID 是后端的十六进制串，别的值一律不信 */
 const FOLDER_ID = /^[0-9a-f]+$/i;

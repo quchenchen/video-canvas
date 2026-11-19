@@ -250,9 +250,10 @@ export function useStudioState(drama: Drama, no: number, refresh: () => Promise<
             ratio: drama.ratio,
             overrides: prefs.overrides,
             assets,
+            voiceScope: video.model?.voice_scope,
           })
         : null,
-    [assets, caps, drama.ratio, prefs.overrides, prompt, selected],
+    [assets, caps, drama.ratio, prefs.overrides, prompt, selected, video.model?.voice_scope],
   );
   const credits = useMemo(() => {
     if (!plan || !video.model || Object.keys(plan.input).length === 0) return undefined;

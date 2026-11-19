@@ -111,6 +111,7 @@ type ChannelView struct {
 	SecretSet    bool               `json:"secret_set"`
 	SecretKeySet bool               `json:"secret_key_set"`
 	Filing       ChannelFilingView  `json:"filing"`
+	VoiceScope   string             `json:"voice_scope"` // 公开素材资源域声明（ark-cn / byteplus），空表示按 BaseURL 推断
 	UpdatedBy    uint64             `json:"updated_by"`
 	UpdatedAt    time.Time          `json:"updated_at"`
 	CreatedAt    time.Time          `json:"created_at"`
@@ -118,25 +119,27 @@ type ChannelView struct {
 
 // ChannelCreateInput 是新建渠道的参数。
 type ChannelCreateInput struct {
-	Key       string
-	Name      string
-	BaseURL   string
-	Headers   map[string]string
-	RateLimit provider.RateLimit
-	Enabled   bool // 调用方在请求没传时按 true 传入
-	ActorID   uint64
+	Key        string
+	Name       string
+	BaseURL    string
+	Headers    map[string]string
+	RateLimit  provider.RateLimit
+	Enabled    bool   // 调用方在请求没传时按 true 传入
+	VoiceScope string // 公开素材资源域：ark-cn / byteplus / 空（按 base_url 推断）
+	ActorID    uint64
 }
 
 // ChannelUpdateInput 是更新渠道的参数：指针 / nil 的字段表示“不改”。
 type ChannelUpdateInput struct {
-	Key       string
-	Name      *string
-	BaseURL   *string
-	Headers   map[string]string   // nil 表示不改；非 nil（含空对象）表示整体替换
-	RateLimit *provider.RateLimit // nil 表示不改
-	Enabled   *bool
-	Filing    *model.ChannelFiling // nil 表示不改；非 nil 表示整体替换
-	ActorID   uint64
+	Key        string
+	Name       *string
+	BaseURL    *string
+	Headers    map[string]string   // nil 表示不改；非 nil（含空对象）表示整体替换
+	RateLimit  *provider.RateLimit // nil 表示不改
+	Enabled    *bool
+	Filing     *model.ChannelFiling // nil 表示不改；非 nil 表示整体替换
+	VoiceScope *string              // nil 表示不改；指向空串表示改回「按 BaseURL 推断」
+	ActorID    uint64
 }
 
 // List 返回所有渠道（按 sort、key 升序），带 secret_set 与 secret_key_set。返回的切片永远不是 nil。
@@ -198,6 +201,8 @@ func (s *AIChannelService) Create(ctx context.Context, in ChannelCreateInput) (*
 	problems = appendIf(problems, msg)
 	headers, msg := checkChannelHeaders(in.Headers)
 	problems = appendIf(problems, msg)
+	voiceScope, msg := checkVoiceScope(in.VoiceScope)
+	problems = appendIf(problems, msg)
 	problems = appendIf(problems, checkRateLimit(in.RateLimit))
 	if len(problems) > 0 {
 		return nil, invalidChannel(problems)
@@ -222,7 +227,7 @@ func (s *AIChannelService) Create(ctx context.Context, in ChannelCreateInput) (*
 	}
 	ch := &model.AIChannel{
 		Key: in.Key, Name: name, BaseURL: baseURL, HeadersJSON: model.JSONText(headersJSON), RateLimitJSON: model.JSONText(rateJSON),
-		Sort: sortNo, Enabled: in.Enabled, UpdatedBy: in.ActorID,
+		Sort: sortNo, Enabled: in.Enabled, VoiceScope: voiceScope, UpdatedBy: in.ActorID,
 	}
 	err = s.repo.CreateChannel(ctx, ch)
 	// 自动生成的 key 撞上已有渠道：换一个重试；显式传的 key 重复就是 409
@@ -262,7 +267,7 @@ func (s *AIChannelService) view(ctx context.Context, ch *model.AIChannel) (*Chan
 	}
 	v := &ChannelView{
 		Key: ch.Key, Name: ch.Name, BaseURL: ch.BaseURL, Headers: decodeStringMap(ch.HeadersJSON), Sort: ch.Sort,
-		Enabled: ch.Enabled, SecretSet: set, SecretKeySet: keySet,
+		Enabled: ch.Enabled, SecretSet: set, SecretKeySet: keySet, VoiceScope: ch.VoiceScope,
 		UpdatedBy: ch.UpdatedBy, UpdatedAt: ch.UpdatedAt, CreatedAt: ch.CreatedAt,
 	}
 	if len(ch.RateLimitJSON) > 0 {

@@ -50,6 +50,7 @@ describe("emptyChannelForm", () => {
       filingEnabled: false,
       filingGroupId: "",
       filingProjectName: "",
+      voiceScope: "",
     });
   });
 });
@@ -67,7 +68,13 @@ describe("channelFormFromView", () => {
       filingEnabled: false,
       filingGroupId: "",
       filingProjectName: "",
+      voiceScope: "",
     });
+  });
+
+  test("公开素材资源域读进表单；旧后端没有这个字段时按空串（按 Base URL 推断）", () => {
+    expect(channelFormFromView(view({ voice_scope: "byteplus" })).voiceScope).toBe("byteplus");
+    expect(channelFormFromView(view({ voice_scope: undefined })).voiceScope).toBe("");
   });
 
   test("headers 为空或缺失时没有行", () => {
@@ -339,5 +346,41 @@ describe("filingSiteOf：备案站点", () => {
     expect(filingSiteOf("https://ark.ap-southeast.bytepluses.com/api/v3")).toBe("ap-southeast-1");
     expect(filingSiteOf("ark.byteplus")).toBe("ap-southeast-1");
     expect(filingSiteOf("")).toBe("cn-beijing");
+  });
+});
+
+describe("公开素材资源域（voice_scope）", () => {
+  test("新建：选了才带上，留空不传（后端按 Base URL 推断）", () => {
+    const picked = buildChannelRequest(newForm({ voiceScope: "ark-cn" }));
+    expect(picked.ok && picked.create.voice_scope).toBe("ark-cn");
+
+    const auto = buildChannelRequest(newForm());
+    expect(auto.ok && "voice_scope" in auto.create).toBe(false);
+  });
+
+  test("编辑：改值只带 voice_scope", () => {
+    const original = view({ voice_scope: "ark-cn" });
+    const result = buildChannelRequest(
+      { ...channelFormFromView(original), voiceScope: "byteplus" },
+      original,
+    );
+    expect(result.ok && result.changed).toBe(true);
+    expect(result.ok && result.update).toEqual({ voice_scope: "byteplus" });
+  });
+
+  test("编辑：空串是有效改动（改回按 Base URL 推断）", () => {
+    const original = view({ voice_scope: "byteplus" });
+    const result = buildChannelRequest(
+      { ...channelFormFromView(original), voiceScope: "" },
+      original,
+    );
+    expect(result.ok && result.update).toEqual({ voice_scope: "" });
+  });
+
+  test("编辑：没动就不带", () => {
+    const original = view({ voice_scope: "byteplus" });
+    const result = buildChannelRequest(channelFormFromView(original), original);
+    expect(result.ok && result.changed).toBe(false);
+    expect(result.ok && result.update).toEqual({});
   });
 });

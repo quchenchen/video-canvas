@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
+import { getAsset } from "@/api/asset";
 import type { AssetDto } from "@/api/asset/type";
 import { ChromeButton } from "@/components/canvas/chrome/chrome";
 import { MediaLightbox, type LightboxTarget } from "@/components/canvas/media-lightbox";
@@ -45,6 +46,7 @@ import {
   MAX_TEXT,
   renameCharacter,
 } from "@/utils/characters/node-character";
+import { stripVoicePrefix } from "@/utils/assets/official-voices";
 import { setVoiceFromHistory } from "@/utils/characters/voice-history";
 import { episodesLabel } from "@/utils/drama/assets";
 
@@ -119,7 +121,17 @@ const ORIGIN_LABEL: Record<string, string> = {
 const BARS = [0.45, 0.8, 0.55, 1, 0.65, 0.9, 0.4, 0.7, 0.5];
 
 /** 当前声音的试听条：圆形播放键 + 声波 + 来源 */
-function VoicePlayer({ assetId, src, origin }: { assetId: string; src: string; origin: string }) {
+function VoicePlayer({
+  assetId,
+  src,
+  origin,
+  name,
+}: {
+  assetId: string;
+  src: string;
+  origin: string;
+  name?: string;
+}) {
   const playing = useVoicePlaying(assetId);
   return (
     <div className="flex h-12 items-center gap-3 rounded-full pr-4 pl-1.5">
@@ -143,8 +155,8 @@ function VoicePlayer({ assetId, src, origin }: { assetId: string; src: string; o
           />
         ))}
       </span>
-      <span className="text-muted-foreground ml-auto truncate text-xs">
-        {ORIGIN_LABEL[origin] ?? "音频"}
+      <span className="text-muted-foreground ml-auto min-w-0 truncate text-right text-xs">
+        {name?.trim() || ORIGIN_LABEL[origin] || "音频"}
       </span>
     </div>
   );
@@ -169,7 +181,7 @@ export function CharacterDetailDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
-  const { updateNodeData } = useReactFlow<CanvasNode>();
+  const { updateNodeData, getNode } = useReactFlow<CanvasNode>();
   const character = data.character ?? emptyCharacter(data.label);
   /** 角色名输入框：允许暂时清空，失焦时空名恢复原名；有内容就实时写回 */
   const [name, setName] = useState(character.name);
@@ -191,6 +203,29 @@ export function CharacterDetailDialog({
     if (warnings.length > 0) toast.warning([...new Set(warnings)].join("；"));
   };
   const media = useCharacterMedia((asset, purpose) => apply([asset], purpose, "upload"));
+
+  // 早年绑的音色没记名字（详情页此前只显示「素材库」）：打开时补查一次素材名，写回节点。
+  // 查不到（素材被清理、没网）就算了，保持原样，不影响试听与生成。
+  const voiceAssetId = character.voice?.assetId;
+  const voiceName = character.voice?.name;
+  useEffect(() => {
+    if (!open || !voiceAssetId || voiceName?.trim()) return;
+    let alive = true;
+    getAsset(voiceAssetId)
+      .then((asset) => {
+        const name = stripVoicePrefix(asset.fileName);
+        const cur = getNode(id)?.data.character;
+        if (!alive || !name || !cur || cur.voice?.assetId !== voiceAssetId) return;
+        if (cur.voice.name?.trim()) return;
+        updateNodeData(id, { character: { ...cur, voice: { ...cur.voice, name } } });
+      })
+      .catch(() => {
+        // 静默失败：名字只是展示用
+      });
+    return () => {
+      alive = false;
+    };
+  }, [open, voiceAssetId, voiceName, id, getNode, updateNodeData]);
   /** 从真人库引入：真人的可用图片替换主图和补充图，之后照常可以换、删 */
   const [pickingHuman, setPickingHuman] = useState(false);
   const applyHuman = (images: AssetDto[]) => {
@@ -475,6 +510,7 @@ export function CharacterDetailDialog({
                         assetId={character.voice.assetId}
                         src={character.voice.src}
                         origin={character.voice.origin}
+                        name={character.voice.name}
                       />
                     ) : (
                       <p className="text-muted-foreground flex h-12 items-center px-5 text-sm">

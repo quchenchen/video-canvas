@@ -1056,13 +1056,13 @@ func (o *operation) resolveRef(ctx context.Context, ref fileRef) (any, error) {
 	}
 }
 
-// filedAssetURI 查素材的上游素材引用：只有插件标了 filed、宿主配置了真人库、且素材在任务所走的渠道下备案可用时才返回 ok=true。
+// filedAssetURI 查素材的上游素材引用：只有插件标了 filed、宿主配置了真人库、且素材在任务所走的渠道下备案可用 / 与渠道同资源域时才返回 ok=true。
 // 只替换地址形态（url / dataUrl）：纯 base64 字段放 asset:// 没有意义。
 func (o *operation) filedAssetURI(ctx context.Context, ref fileRef, assetID uint64) (string, bool) {
 	if !ref.filed || ref.as == "base64" || o.e.opts.FiledAssets == nil {
 		return "", false
 	}
-	return o.e.opts.FiledAssets.FiledAssetURI(ctx, o.task.UserID, assetID, o.rt.Channel.Key)
+	return o.e.opts.FiledAssets.FiledAssetURI(ctx, o.task.UserID, assetID, o.rt.Channel)
 }
 
 func (o *operation) httpRequest(ctx context.Context, b *builtRequest) (*http.Request, func(), error) {

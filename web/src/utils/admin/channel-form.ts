@@ -63,7 +63,24 @@ export type ChannelFormState = {
   filingGroupId: string;
   /** 虚拟人像库的方舟项目名，空表示 default */
   filingProjectName: string;
+  /** 公开素材资源域；空表示按 Base URL 推断 */
+  voiceScope: string;
 };
+
+/** 公开素材资源域的选项：方舟国内站与 BytePlus 国际站各一套公开音色，asset ID 只在同一域内通用 */
+export const VOICE_SCOPE_OPTIONS: readonly { value: string; label: string; hint: string }[] = [
+  { value: "", label: "按 Base URL 推断", hint: "地址是方舟 / BytePlus 官方域名时自动识别" },
+  { value: "ark-cn", label: "方舟国内站（ark-cn）", hint: "cn-beijing 的公开音色" },
+  { value: "byteplus", label: "BytePlus 国际站（byteplus）", hint: "ap-southeast-1 的公开音色" },
+];
+
+/**
+ * 公开素材资源域的一句话说明：选中值 + 该域能用的音色。
+ * @param value 表单里的 voice_scope
+ */
+export function voiceScopeHint(value: string): string {
+  return VOICE_SCOPE_OPTIONS.find((item) => item.value === value)?.hint ?? "";
+}
 
 /** 新建渠道的空表单 */
 export function emptyChannelForm(): ChannelFormState {
@@ -78,6 +95,7 @@ export function emptyChannelForm(): ChannelFormState {
     filingEnabled: false,
     filingGroupId: "",
     filingProjectName: "",
+    voiceScope: "",
   };
 }
 
@@ -100,6 +118,7 @@ export function channelFormFromView(view: ChannelView): ChannelFormState {
     filingEnabled: !!view.filing?.enabled,
     filingGroupId: view.filing?.group_id ?? "",
     filingProjectName: view.filing?.project_name ?? "",
+    voiceScope: view.voice_scope ?? "",
   };
 }
 
@@ -244,6 +263,7 @@ export function buildChannelRequest(
     rate_limit: rateLimit,
     enabled: form.enabled,
   };
+  if (form.voiceScope) create.voice_scope = form.voiceScope;
   if (!original) return { ok: true, create, update: {}, changed: true };
 
   const update: ChannelUpdateRequest = {};
@@ -257,6 +277,9 @@ export function buildChannelRequest(
   };
   if (JSON.stringify(rateLimit) !== JSON.stringify(originalLimit)) update.rate_limit = rateLimit;
   if (create.enabled !== !!original.enabled) update.enabled = create.enabled;
+  // 空串也是有效改动：表示改回「按 Base URL 推断」，所以不能只看真值
+  if ((create.voice_scope ?? "") !== (original.voice_scope ?? ""))
+    update.voice_scope = form.voiceScope;
   const originalFiling = {
     enabled: !!original.filing?.enabled,
     group_id: original.filing?.group_id ?? "",

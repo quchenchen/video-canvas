@@ -62,6 +62,39 @@ func (f *fakeAssetRepo) GetByID(ctx context.Context, userID, id uint64) (*model.
 	return &cp, nil
 }
 
+// ListByKindSource 按 kind + source 过滤，按 id 排序后分页。
+func (f *fakeAssetRepo) ListByKindSource(ctx context.Context, kind, source string, offset, limit int) ([]model.Asset, int64, error) {
+	var all []model.Asset
+	for _, a := range f.rows {
+		if a.Kind == kind && a.Source == source {
+			all = append(all, *a)
+		}
+	}
+	sort.Slice(all, func(i, j int) bool { return all[i].ID < all[j].ID })
+	total := int64(len(all))
+	if offset >= len(all) {
+		return []model.Asset{}, total, nil
+	}
+	end := offset + limit
+	if end > len(all) {
+		end = len(all)
+	}
+	return all[offset:end], total, nil
+}
+
+// GetByIDAnyUser 不带用户条件，只按 id 查；官方素材靠它放行给任意用户。
+func (f *fakeAssetRepo) GetByIDAnyUser(ctx context.Context, id uint64) (*model.Asset, error) {
+	if f.getErr != nil {
+		return nil, f.getErr
+	}
+	a, ok := f.rows[id]
+	if !ok {
+		return nil, repository.ErrNotFound
+	}
+	cp := *a
+	return &cp, nil
+}
+
 func (f *fakeAssetRepo) GetByStorageKey(ctx context.Context, key string) (*model.Asset, error) {
 	if f.getErr != nil {
 		return nil, f.getErr

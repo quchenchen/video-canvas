@@ -266,7 +266,8 @@ var (
 	ErrImportUnsupported = errors.New("插件不支持导入模型")
 )
 
-// ModelInfo 是面向画布的模型信息（GET /models），不含 params / 渠道 / 插件细节。
+// ModelInfo 是面向画布的模型信息（GET /models），不含 params / 渠道地址 / 插件细节。
+// VoiceScope 是画布判定「音色能不能按 asset:// 传」要用的资源域，只暴露域、不暴露渠道。
 type ModelInfo struct {
 	Key          string                `json:"key"`
 	Kind         string                `json:"kind"`
@@ -276,6 +277,7 @@ type ModelInfo struct {
 	Tags         []string              `json:"tags"`
 	Pricing      modelcfg.Pricing      `json:"pricing"` // 不含积分成本
 	Capabilities modelcfg.Capabilities `json:"capabilities"`
+	VoiceScope   string                `json:"voice_scope,omitempty"` // 所属渠道的公开素材资源域（ark-cn / byteplus），空表示不可用 asset://
 }
 
 // Registry 只读访问“已发布”的模型配置。实现方缓存编译结果，发布 / 回滚 / 渠道变更后热生效。
@@ -414,7 +416,8 @@ const (
 const FilingAssetURIPrefix = "asset://"
 
 // FiledAssetResolver 把任务输入里的素材换成已备案的上游素材引用（asset://…）。
-// 只有素材在真人库里备案可用、且备案渠道就是任务所走的渠道时才返回 ok=true；其余情况调用方照常用图片地址。
+// 真人图片要求备案渠道就是任务所走的渠道；公开音色要求任务渠道与音色同属一个资源域。
+// 其余情况返回 ok=false，调用方照常用图片/音频地址。
 type FiledAssetResolver interface {
-	FiledAssetURI(ctx context.Context, userID, assetID uint64, channelKey string) (uri string, ok bool)
+	FiledAssetURI(ctx context.Context, userID, assetID uint64, ch ChannelSnapshot) (uri string, ok bool)
 }

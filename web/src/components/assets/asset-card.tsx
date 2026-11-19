@@ -46,6 +46,19 @@ export function AssetCover({ asset }: { asset: AssetDto }) {
       </div>
     );
   }
+  // 音色库的卡片带缩略图：像图片一样显示封面；没有缩略图的普通音频保持音符占位。
+  if (asset.kind === "audio" && asset.thumbnailUrl) {
+    return (
+      <div className="absolute inset-0">
+        <MediaPreview
+          src={asset.thumbnailUrl}
+          mode="thumb"
+          fit="cover"
+          alt={asset.fileName ?? ""}
+        />
+      </div>
+    );
+  }
   return (
     <div className="bg-muted text-muted-foreground/60 absolute inset-0 grid place-items-center">
       <Music2 className="size-1/4" />

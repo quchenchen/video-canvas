@@ -49,6 +49,29 @@ func (r *AssetRepository) GetByID(ctx context.Context, userID, id uint64) (*mode
 	return &a, nil
 }
 
+// GetByIDAnyUser 按 ID 查询，不带用户条件：给读取系统官方素材用，调用方必须自己校验 source。
+// 写操作不能用它，归属校验一律走 GetByID。
+func (r *AssetRepository) GetByIDAnyUser(ctx context.Context, id uint64) (*model.Asset, error) {
+	var a model.Asset
+	if err := r.db.WithContext(ctx).Where("id = ?", id).First(&a).Error; err != nil {
+		return nil, translate(err)
+	}
+	return &a, nil
+}
+
+// OfficialAsset 按 ID 查一条系统官方音色（source=official 且官方 ID 非空），供生成时换 asset://。
+// 查不到、不是官方素材都返回 ok=false；错误按未命中处理（照常传普通 URL），不阻断生成。
+func (r *AssetRepository) OfficialAsset(ctx context.Context, id uint64) (*model.Asset, bool) {
+	var a model.Asset
+	err := r.db.WithContext(ctx).
+		Where("id = ? AND source = ? AND official_asset_id <> ''", id, model.AssetSourceOfficial).
+		First(&a).Error
+	if err != nil {
+		return nil, false
+	}
+	return &a, true
+}
+
 // FindBySha256 按内容哈希与文件大小查找素材，不带用户条件：给画布导入 / 复制按内容复用已有文件用，
 // 调用方只取文件本身（存储位置），不会把别人的素材行暴露给用户。按 id 升序最多返回 5 条（取最早的几份即可），
 // sha 为空串时不会匹配“未计算”的行，直接返回空切片；查不到返回空切片（非 nil），不返回 ErrNotFound。

@@ -18,6 +18,7 @@ import { cn } from "@/lib/utils";
 import { RefStrip } from "@/components/canvas/ref-strip";
 import { FrameStage } from "@/components/canvas/frame-stage";
 import { TrimStage } from "@/components/canvas/trim-stage";
+import type { AssetDto } from "@/api/asset/type";
 import type { GenerationOp } from "@/api/model/type";
 import { Button } from "@/components/ui/button";
 import {
@@ -53,10 +54,13 @@ import {
   OP_LABEL,
   PORTS_OF_KIND,
   REF_KEYS,
+  acceptableRefKinds,
   manualRefs,
   opDisabledHint,
+  opToAcceptSource,
   openParams,
   paramSummary,
+  refKindsOf,
 } from "@/utils/tasks/capabilities";
 import type { VideoNodeView } from "@/utils/tasks/node-view";
 
@@ -198,6 +202,27 @@ export function TaskPromptPanel({
   const locked = vm.running || vm.submitting;
   const ops = vm.caps?.ops ?? [];
   const params = openParams(vm.caps);
+
+  // 音色库放在引用条的「+」里：模型只要支持参考音频就能选；当前方式不收音频时自动切到全能参考。
+  const supportsVoice = !!vm.caps && acceptableRefKinds(vm.caps).includes("audio");
+  const voiceOp =
+    supportsVoice && !refKindsOf(vm.caps, vm.op).includes("audio")
+      ? opToAcceptSource(vm.caps, vm.op, "audio")
+      : vm.op;
+  const officialVoice = supportsVoice
+    ? {
+        disabled: locked,
+        onPick: (asset: AssetDto) => {
+          if (voiceOp && voiceOp !== vm.op) vm.setOp(voiceOp);
+          vm.addRef("audios", asset.id, {
+            url: asset.url,
+            fileName: asset.fileName ?? "音色",
+            mediaType: asset.kind,
+          });
+        },
+      }
+    : undefined;
+
   const panelProps = vm.caps && {
     caps: vm.caps,
     op: vm.refOp,
@@ -292,6 +317,7 @@ export function TaskPromptPanel({
           onUnlink={vm.unlink}
           uploadKinds={vm.uploadKinds}
           onUpload={vm.addRef}
+          officialVoice={officialVoice}
           onRemoveManual={vm.removeRef}
           errors={REF_KEYS.flatMap((ref) => (vm.errors[ref.key] ? [vm.errors[ref.key]] : []))}
           notices={vm.bindings.notices}

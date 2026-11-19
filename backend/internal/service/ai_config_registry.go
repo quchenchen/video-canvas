@@ -55,6 +55,8 @@ func (s *AIConfigService) ListModels(ctx context.Context, kind string) ([]provid
 			Key: m.key, Kind: m.cfg.Kind, Label: m.cfg.Label, Hint: m.cfg.Hint,
 			Vendor: m.cfg.Vendor, Tags: nonNilTags(m.cfg.Tags),
 			Pricing: m.cfg.Pricing.Public(), Capabilities: m.cfg.Capabilities.Public(),
+			// 画布用它判断「角色音色能不能按 asset:// 传」：渠道声明优先，没声明按 base_url 推断（与执行侧同一套判定）
+			VoiceScope: provider.ResolveChannelScope(m.rt.Channel.VoiceScope, m.rt.Channel.BaseURL),
 		})
 	}
 	return out, nil
