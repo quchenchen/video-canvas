@@ -323,7 +323,7 @@ export default function MarketingDetailPage() {
     <FocusLoader
       icon={<Logo size={56} animated />}
       plainIcon
-      title="连镜"
+      title="ScriptNow"
       subtitle={project ? `正在打开「${project.title}」` : "正在打开营销片"}
       label={project ? `正在打开营销片「${project.title}」` : "正在打开营销片"}
       ready={!!project}

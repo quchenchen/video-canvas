@@ -1,7 +1,7 @@
 import { findNav } from "@/pages/admin/admin-nav";
 
 /** 应用名：所有标签页标题的末尾 */
-export const APP_NAME = "连镜";
+export const APP_NAME = "ScriptNow";
 
 /**
  * 拼浏览器标签页标题：各段用「 - 」连接，末尾固定是应用名，空段忽略
