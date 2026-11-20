@@ -44,6 +44,7 @@ export function LibraryPickerForCharacter({
       }}
       title={purpose ? TITLE[purpose] : undefined}
       withHumans={purpose === "main" || purpose === "extra"}
+      withOfficialVoices={purpose === "voice"}
       confirmLabel="确定"
       onConfirm={(assets) => purpose && onConfirm(assets, purpose)}
     />

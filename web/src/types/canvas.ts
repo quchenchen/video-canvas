@@ -102,6 +102,17 @@ export type CharacterVoice = {
   assetId: string;
   src: string;
   origin: "upload" | "generated" | "library";
+  /**
+   * 绑定的是公开音色时，它所属的资源域（ark-cn / byteplus）；普通音频没有这个字段。
+   * 只有最终视频模型也在这个域，生成时才会用 asset:// 引用，否则按音频文件传——
+   * 分镜素材条据此提示「音色与模型不同域」。
+   */
+  scope?: string;
+  /**
+   * 声音的名字（绑定那一刻从素材带过来，BytePlus 的「年龄 - 性别 - 」前缀已去掉）。
+   * 角色卡、素材条上直接显示它，让人一眼知道绑的是哪个音色；老数据没有这个字段，退回显示「声音」。
+   */
+  name?: string;
 };
 
 /**

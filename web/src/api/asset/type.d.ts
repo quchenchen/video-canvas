@@ -18,6 +18,18 @@ export interface AssetDto {
   durationMs: number | null;
   /** 原始文件名 */
   fileName: string | null;
+  /** 缩略图地址；音色库有，普通素材为空串 */
+  thumbnailUrl?: string;
+  /** 官方溯源 ID；音色库有，普通素材为空串 */
+  officialAssetId?: string;
+  /** 公开音色所属资源域：ark-cn（方舟国内）/ byteplus（国际站）；普通素材为空串 */
+  scope?: string;
+  /** 公开音色的年龄段：child / teen / young / middle / older；普通素材为空串 */
+  voiceAge?: string;
+  /** 公开音色的性别：male / female；普通素材为空串 */
+  voiceGender?: string;
+  /** 公开音色的语言：zh（中文）/ en（英文）；普通素材为空串 */
+  voiceLang?: string;
 }
 
 /** 后端 POST /assets 的原始响应（AssetView，snake_case，id 为数字） */
@@ -40,6 +52,18 @@ export interface BackendAssetDto {
   duration_ms?: number | null;
   /** 原始文件名 */
   file_name?: string | null;
+  /** 缩略图地址（音色库） */
+  thumbnail_url?: string | null;
+  /** 官方溯源 ID（音色库） */
+  official_asset_id?: string | null;
+  /** 公开音色所属资源域（Ark 国内 / BytePlus） */
+  scope?: string | null;
+  /** 公开音色的年龄段（child / teen / young / middle / older） */
+  voice_age?: string | null;
+  /** 公开音色的性别（male / female） */
+  voice_gender?: string | null;
+  /** 公开音色的语言（zh / en） */
+  voice_lang?: string | null;
   // 兼容早先前端期望的 camelCase 形态
   /** MIME 类型（camelCase 兼容字段） */
   mimeType?: string | null;

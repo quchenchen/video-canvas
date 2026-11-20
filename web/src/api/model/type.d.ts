@@ -131,4 +131,6 @@ export interface ModelInfo {
   pricing: Pricing;
   /** 模型能力：生成方式、参考素材、提示词上限与生成参数 */
   capabilities: Capabilities;
+  /** 所属渠道的公开素材资源域（ark-cn / byteplus）；空表示该模型的音色只能按音频文件传 */
+  voice_scope?: string;
 }

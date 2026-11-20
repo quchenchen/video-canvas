@@ -37,7 +37,7 @@ module.exports = {
     apiVersion: 1,
     key: "doubao-video",
     name: "豆包（火山方舟） · 视频",
-    version: "1.2.1",
+    version: "1.3.0",
     vendor: "volcengine",
     description: "火山引擎豆包 Seedance 视频生成（异步）",
     auth: { type: "bearer" },
@@ -180,9 +180,11 @@ function videoContent(input, referenceFormat) {
   }
   var audios = isArray(input.audios) ? input.audios : [];
   for (var a = 0; a < audios.length; a++) {
+    // 音频也标 filed：官方参考音色是方舟官方素材，宿主会换成 asset://<官方 ID> 交给 Seedance；
+    // 用户自己上传的音频查不到官方 ID，宿主保持原来的签名 URL，行为不变。
     content.push({
       type: "audio_url",
-      audio_url: { url: { __fileRef: audios[a], as: referenceFormat } },
+      audio_url: { url: { __fileRef: audios[a], as: referenceFormat, filed: true } },
       role: "reference_audio",
     });
   }

@@ -38,6 +38,15 @@ describe("弹框视图状态", () => {
     });
   });
 
+  test("切到 音色库来源：保留类型标签，回到根目录", () => {
+    const view: PickerView = { source: "library", kind: "audio", folder: "f1" };
+    expect(switchSource(view, "official")).toEqual({
+      source: "official",
+      kind: "audio",
+      folder: null,
+    });
+  });
+
   test("切类型：保留来源和文件夹", () => {
     const view: PickerView = { source: "library", kind: "image", folder: "f1" };
     expect(switchKind(view, "audio")).toEqual({ source: "library", kind: "audio", folder: "f1" });
@@ -56,6 +65,13 @@ describe("uploadFolder：弹框内上传归入哪个文件夹", () => {
   test("个人资产库里归入当前文件夹，根目录是 null", () => {
     expect(uploadFolder({ source: "library", kind: "image", folder: "f1" })).toBe("f1");
     expect(uploadFolder(INITIAL_PICKER_VIEW)).toBeNull();
+  });
+
+  test("音色库等来源不归入任何文件夹", () => {
+    expect(uploadFolder({ source: "official", kind: "audio", folder: null })).toBeNull();
+    expect(
+      enterFolder({ source: "official", kind: "audio", folder: null }, "f1").folder,
+    ).toBeNull();
   });
 });
 

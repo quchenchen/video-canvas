@@ -713,21 +713,21 @@ func TestFiledAssetResolver(t *testing.T) {
 	v, _ := env.svc.Create(ctx, vhUser, "a", 11)
 	r := NewFiledAssetResolver(env.repo)
 
-	if _, ok := r.FiledAssetURI(ctx, vhUser, 11, "ark"); ok {
+	if _, ok := r.FiledAssetURI(ctx, vhUser, 11, provider.ChannelSnapshot{Key: "ark"}); ok {
 		t.Fatal("审核中的图片不能换成 asset://")
 	}
 	env.repo.images[decodeID(t, v.Images[0].ID)].Status = model.FilingActive
-	uri, ok := r.FiledAssetURI(ctx, vhUser, 11, "ark")
+	uri, ok := r.FiledAssetURI(ctx, vhUser, 11, provider.ChannelSnapshot{Key: "ark"})
 	if !ok || uri != "asset://asset-1" {
 		t.Fatalf("FiledAssetURI = %q, %v", uri, ok)
 	}
-	if _, ok := r.FiledAssetURI(ctx, vhUser, 11, "other"); ok {
+	if _, ok := r.FiledAssetURI(ctx, vhUser, 11, provider.ChannelSnapshot{Key: "other"}); ok {
 		t.Fatal("别的渠道不能用这个渠道的备案")
 	}
-	if _, ok := r.FiledAssetURI(ctx, 99, 11, "ark"); ok {
+	if _, ok := r.FiledAssetURI(ctx, 99, 11, provider.ChannelSnapshot{Key: "ark"}); ok {
 		t.Fatal("别人的素材不能换")
 	}
-	if _, ok := r.FiledAssetURI(ctx, vhUser, 12, "ark"); ok {
+	if _, ok := r.FiledAssetURI(ctx, vhUser, 12, provider.ChannelSnapshot{Key: "ark"}); ok {
 		t.Fatal("不在真人库里的素材不能换")
 	}
 }
@@ -743,7 +743,7 @@ func TestFiledAssetResolver_ChecksPendingOnce(t *testing.T) {
 		r := NewFiledAssetResolver(env.repo)
 		r.UseFiling(env.filing, env.client)
 		env.client.status["asset-1"] = provider.FilingAssetActive
-		uri, ok := r.FiledAssetURI(ctx, vhUser, 11, "ark")
+		uri, ok := r.FiledAssetURI(ctx, vhUser, 11, provider.ChannelSnapshot{Key: "ark"})
 		if !ok || uri != "asset://asset-1" {
 			t.Fatalf("FiledAssetURI = %q, %v", uri, ok)
 		}
@@ -758,7 +758,7 @@ func TestFiledAssetResolver_ChecksPendingOnce(t *testing.T) {
 		r := NewFiledAssetResolver(env.repo)
 		r.UseFiling(env.filing, env.client)
 		env.client.status["asset-1"] = provider.FilingAssetFailed
-		if _, ok := r.FiledAssetURI(ctx, vhUser, 11, "ark"); ok {
+		if _, ok := r.FiledAssetURI(ctx, vhUser, 11, provider.ChannelSnapshot{Key: "ark"}); ok {
 			t.Fatal("审核失败不能换成 asset://")
 		}
 		img := env.repo.images[decodeID(t, v.Images[0].ID)]
@@ -771,18 +771,18 @@ func TestFiledAssetResolver_ChecksPendingOnce(t *testing.T) {
 		env := newVHEnv(t)
 		_, _ = env.svc.Create(ctx, vhUser, "a", 11)
 		r := NewFiledAssetResolver(env.repo)
-		if _, ok := r.FiledAssetURI(ctx, vhUser, 11, "ark"); ok || len(env.client.queried) != 0 {
+		if _, ok := r.FiledAssetURI(ctx, vhUser, 11, provider.ChannelSnapshot{Key: "ark"}); ok || len(env.client.queried) != 0 {
 			t.Fatalf("没接备案配置时不查方舟：查了 %v", env.client.queried)
 		}
 		r.UseFiling(env.filing, env.client)
-		if _, ok := r.FiledAssetURI(ctx, vhUser, 11, "ark"); ok || len(env.client.queried) != 1 {
+		if _, ok := r.FiledAssetURI(ctx, vhUser, 11, provider.ChannelSnapshot{Key: "ark"}); ok || len(env.client.queried) != 1 {
 			t.Fatalf("还在审核应按普通图片传，且只查一次：查了 %v", env.client.queried)
 		}
-		if _, ok := r.FiledAssetURI(ctx, vhUser, 11, "other"); ok || len(env.client.queried) != 1 {
+		if _, ok := r.FiledAssetURI(ctx, vhUser, 11, provider.ChannelSnapshot{Key: "other"}); ok || len(env.client.queried) != 1 {
 			t.Fatalf("别的渠道不查：查了 %v", env.client.queried)
 		}
 		env.filing.target = nil
-		if _, ok := r.FiledAssetURI(ctx, vhUser, 11, "ark"); ok || len(env.client.queried) != 1 {
+		if _, ok := r.FiledAssetURI(ctx, vhUser, 11, provider.ChannelSnapshot{Key: "ark"}); ok || len(env.client.queried) != 1 {
 			t.Fatalf("虚拟人像库没配置时不查：查了 %v", env.client.queried)
 		}
 	})

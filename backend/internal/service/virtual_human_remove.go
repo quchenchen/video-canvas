@@ -203,14 +203,27 @@ const pendingCheckTimeout = 5 * time.Second
 // 单独成一个类型，是因为插件执行器比渠道服务先组装，不能依赖完整的 VirtualHumanService；
 // 查审核状态要用的备案目标和方舟客户端在渠道服务建好后由 UseFiling 接上。
 type FiledAssetResolver struct {
-	images FiledAssetImages
-	filing FilingTargetSource
-	client FilingClient
+	images   FiledAssetImages
+	filing   FilingTargetSource
+	client   FilingClient
+	official OfficialAssetSource
+}
+
+// OfficialAssetSource 查询官方参考音色：只有 source=official 且有官方 asset ID 的素材才返回 ok。
+// 由素材仓储实现，官方音色是系统公共素材（user_id=0），不带用户条件。
+type OfficialAssetSource interface {
+	OfficialAsset(ctx context.Context, id uint64) (*model.Asset, bool)
 }
 
 // NewFiledAssetResolver 创建解析器。
 func NewFiledAssetResolver(images FiledAssetImages) *FiledAssetResolver {
 	return &FiledAssetResolver{images: images}
+}
+
+// WithOfficialAssets 接上官方音色来源，只在 initialize 组装时调用一次。
+// 没接上时保持原有行为：只处理真人库备案图片。
+func (r *FiledAssetResolver) WithOfficialAssets(source OfficialAssetSource) {
+	r.official = source
 }
 
 // UseFiling 接上备案目标和方舟客户端，只在 initialize 组装时调用一次（之后不再改，不存在并发写）。
@@ -219,13 +232,30 @@ func (r *FiledAssetResolver) UseFiling(filing FilingTargetSource, client FilingC
 	r.filing, r.client = filing, client
 }
 
-// FiledAssetURI 返回素材的方舟引用。只有图片在该用户的真人库里、备案渠道就是任务所走的渠道时才考虑：
-// 方舟素材只在备案的那个账号下有效，别的渠道拿到也用不了。
+// FiledAssetURI 返回素材的方舟引用。真人图片只有在该用户的真人库里、备案渠道就是任务所走的渠道时才考虑：
+// 方舟素材只在备案的那个账号下有效，别的渠道拿到也用不了。官方参考音色同理，只认同资源域（见 provider.ResolveChannelScope）。
 //   - 已可用：直接返回 asset://；
 //   - 审核中：同步查一次方舟（5 秒超时）。用户刚提交备案就去生成时方舟往往已经通过，不能因为本地还没刷新
 //     就退回普通地址去撞风控；查到通过或失败都写回，免得下次再查；
 //   - 其余情况、以及任何查询出错，按未备案处理（照常传图片地址），只记日志。
-func (r *FiledAssetResolver) FiledAssetURI(ctx context.Context, userID, assetID uint64, channelKey string) (string, bool) {
+func (r *FiledAssetResolver) FiledAssetURI(ctx context.Context, userID, assetID uint64, ch provider.ChannelSnapshot) (string, bool) {
+	// 0. 公开音色：方舟国内站与 BytePlus 各自一套公开素材，asset-xxx 只在同一资源域内有效。
+	//    跨域（例如把国内站的音色拿去 BytePlus）上游会报 asset not found，这里回退成音频文件 URL。
+	//    资源域取渠道声明、没声明时按 base_url 推断；两者冲突或都推断不出来一律回退，宁可退化也不发错地址。
+	//    其他模型不认这个地址，因此只有插件显式声明 filed 时才会走到这里（见 executor.filedAssetURI）。
+	if r.official != nil {
+		if a, ok := r.official.OfficialAsset(ctx, assetID); ok && a.Source == model.AssetSourceOfficial && a.OfficialAssetID != "" {
+			if provider.ScopeConflict(ch.VoiceScope, ch.BaseURL) {
+				logger.Warn("渠道声明的公开素材资源域与 BaseURL 不一致，公开音色按音频文件传",
+					zap.String("channel", ch.Key), zap.String("voice_scope", ch.VoiceScope), zap.String("base_url", ch.BaseURL))
+			}
+			if a.OfficialScope == "" || a.OfficialScope != provider.ResolveChannelScope(ch.VoiceScope, ch.BaseURL) {
+				return "", false
+			}
+			return provider.FilingAssetURIPrefix + a.OfficialAssetID, true
+		}
+	}
+
 	img, err := r.images.GetImageByAsset(ctx, userID, assetID)
 	if err != nil {
 		if !errors.Is(err, repository.ErrNotFound) {
@@ -233,7 +263,7 @@ func (r *FiledAssetResolver) FiledAssetURI(ctx context.Context, userID, assetID 
 		}
 		return "", false
 	}
-	if img.ArkAssetID == "" || img.ChannelKey != channelKey {
+	if img.ArkAssetID == "" || img.ChannelKey != ch.Key {
 		return "", false
 	}
 	switch img.Status {

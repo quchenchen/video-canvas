@@ -46,6 +46,10 @@ type AssetRepo interface {
 	Create(ctx context.Context, a *model.Asset) error
 	// GetByID 按 id 且 user_id 查询，不存在或不属于该用户返回 repository.ErrNotFound。
 	GetByID(ctx context.Context, userID, id uint64) (*model.Asset, error)
+	// GetByIDAnyUser 按 id 查询，不带用户条件：给读取官方公共素材用；写操作仍走 GetByID 做归属校验。
+	GetByIDAnyUser(ctx context.Context, id uint64) (*model.Asset, error)
+	// ListByKindSource 按 kind + source 分页列出素材（不带用户条件），给官方音色列表用。
+	ListByKindSource(ctx context.Context, kind, source string, offset, limit int) ([]model.Asset, int64, error)
 	// GetByStorageKey 按对象 key 查询（不带用户条件，给 /files/<key> 路由用），不存在返回 repository.ErrNotFound。
 	GetByStorageKey(ctx context.Context, key string) (*model.Asset, error)
 	// FindBySha256 按内容哈希与文件大小查找素材，不带用户条件，按 id 升序最多 5 条；查不到返回空切片，sha 为空串时恒为空。
@@ -161,12 +165,16 @@ func (s *AssetService) View(ctx context.Context, userID, id uint64) (*model.Asse
 	return s.ViewOf(ctx, asset)
 }
 
-// ViewOf 把素材行转成对前端的视图。调用方必须已确认素材归属当前用户。
+// ViewOf 把素材行转成对前端的视图。调用方必须已确认素材归属当前用户（或是系统官方素材）。
 //
 // URL 是稳定地址 {站点前缀}/files/<key>：它会被前端写进画布 payload 持久化，所以必须永不过期、
 // 换存储也不变。签名发生在浏览器真正访问 /files 的那一刻（见 ResolveFile），而不是这里。
 func (s *AssetService) ViewOf(ctx context.Context, a *model.Asset) (*model.AssetView, error) {
-	return assetView(a, s.fileURL(a.StorageKey)), nil
+	v := assetView(a, s.fileURL(a.StorageKey))
+	if a.ThumbnailKey != "" {
+		v.ThumbnailURL = s.fileURL(a.ThumbnailKey)
+	}
+	return v, nil
 }
 
 // FileURL 返回素材的稳定访问地址（/files/<key>），给不持有素材记录、只拿到存储 key 的调用方用（如画布列表的封面）。
@@ -188,27 +196,41 @@ func (s *AssetService) signedTTL(h *storage.Handle) time.Duration {
 // assetView 组装对前端的素材视图。
 func assetView(a *model.Asset, url string) *model.AssetView {
 	return &model.AssetView{
-		ID:         a.ID,
-		Kind:       a.Kind,
-		URL:        url,
-		MimeType:   a.MimeType,
-		ByteSize:   a.ByteSize,
-		Width:      a.Width,
-		Height:     a.Height,
-		DurationMs: a.DurationMs,
-		FileName:   a.FileName,
+		ID:              a.ID,
+		Kind:            a.Kind,
+		URL:             url,
+		MimeType:        a.MimeType,
+		ByteSize:        a.ByteSize,
+		Width:           a.Width,
+		Height:          a.Height,
+		DurationMs:      a.DurationMs,
+		FileName:        a.FileName,
+		OfficialAssetID: a.OfficialAssetID,
+		Scope:           a.OfficialScope,
+		VoiceAge:        a.VoiceAge,
+		VoiceGender:     a.VoiceGender,
+		VoiceLang:       a.VoiceLang,
 	}
 }
 
-// Get 实现 provider.AssetStore：查询素材元数据，不存在或不属于该用户返回 provider.ErrAssetNotFound。
+// Get 实现 provider.AssetStore：查询素材元数据供读取与生成引用；不存在、不属于该用户、
+// 且不是系统官方素材时返回 provider.ErrAssetNotFound。
+//
+// 官方参考音色是 user_id=0 的公共素材，所有登录用户都能试听与当参考音频，所以按 user_id 查不到时
+// 再查一次官方来源。写操作（删除、加入资产库）不经过这里，仍走带归属校验的 GetByID，不会被放行。
 func (s *AssetService) Get(ctx context.Context, userID, assetID uint64) (*model.Asset, error) {
 	// 1. 带 user_id 查询；别人的素材和不存在统一返回同一个错误
 	a, err := s.repo.GetByID(ctx, userID, assetID)
 	if err != nil {
-		if errors.Is(err, repository.ErrNotFound) {
+		if !errors.Is(err, repository.ErrNotFound) {
+			return nil, err
+		}
+		// 2. 兜底查系统官方素材：只有 source=official 的公共素材放行，别的私有素材不放行
+		official, oerr := s.repo.GetByIDAnyUser(ctx, assetID)
+		if oerr != nil || official.Source != model.AssetSourceOfficial {
 			return nil, provider.ErrAssetNotFound
 		}
-		return nil, err
+		return official, nil
 	}
 	return a, nil
 }
@@ -295,12 +317,42 @@ func (s *AssetService) SaveGenerated(ctx context.Context, in provider.SaveGenera
 	return asset, url, nil
 }
 
+// OfficialVoicePage 是官方音色的一页：素材视图 + 总数，供资产页「官方音色」列表用。
+type OfficialVoicePage struct {
+	Items []*model.AssetView `json:"items"`
+	Total int64              `json:"total"`
+}
+
+// ListOfficial 列出系统官方参考音色（source=official），按 kind 过滤并分页。
+// 官方素材是公共参考数据，不做用户归属过滤；只返回视图，不含任何内部 key。
+func (s *AssetService) ListOfficial(ctx context.Context, kind string, offset, limit int) (*OfficialVoicePage, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	if kind == "" {
+		kind = "audio"
+	}
+	rows, total, err := s.repo.ListByKindSource(ctx, kind, model.AssetSourceOfficial, offset, limit)
+	if err != nil {
+		return nil, err
+	}
+	items := make([]*model.AssetView, 0, len(rows))
+	for i := range rows {
+		v, err := s.ViewOf(ctx, &rows[i])
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, v)
+	}
+	return &OfficialVoicePage{Items: items, Total: total}, nil
+}
+
 // assetIngest 是统一入库流程的参数。
 type assetIngest struct {
 	UserID       uint64
-	Source       string  // upload / generated
+	Source       string  // upload / generated / official / official_thumb
 	TaskID       *uint64 // 生成产物对应的任务
-	KeyPrefix    string  // 对象 key 首段前缀：u（用户上传）/ g（生成产物）
+	KeyPrefix    string  // 对象 key 首段前缀：u（用户上传）/ g（生成产物）/ o（官方素材）
 	FileName     string  // 已清洗的展示文件名，可为空
 	Body         io.Reader
 	MaxBytes     int64

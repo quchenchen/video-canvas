@@ -835,3 +835,88 @@ func TestAIChannelService_UpstreamLimits(t *testing.T) {
 		adminWantCode(t, err, errcode.ErrChannelPullFailed.Code)
 	})
 }
+
+// 公开素材资源域：渠道上显式声明（ark-cn / byteplus），空表示按 BaseURL 推断。
+// 声明优先是为了自建代理、私有网关也能用上公开音色的 asset:// 引用；取值校验防手滑写错。
+func TestAIChannelService_VoiceScope(t *testing.T) {
+	ctx := context.Background()
+	str := func(s string) *string { return &s }
+
+	t.Run("新建：取值规整成小写并回显，留空表示按 BaseURL 推断", func(t *testing.T) {
+		e := newAchEnv(t)
+		in := createInput()
+		in.VoiceScope = " ARK-CN "
+		view, err := e.svc.Create(ctx, in)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if view.VoiceScope != provider.ScopeArkCN {
+			t.Fatalf("voice_scope 应规整成 %q，得到 %q", provider.ScopeArkCN, view.VoiceScope)
+		}
+
+		empty := createInput()
+		empty.Key = "second"
+		view, err = e.svc.Create(ctx, empty)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if view.VoiceScope != "" {
+			t.Fatalf("没传时应留空（按 BaseURL 推断），得到 %q", view.VoiceScope)
+		}
+	})
+
+	t.Run("新建：认不出的取值直接拒掉", func(t *testing.T) {
+		e := newAchEnv(t)
+		in := createInput()
+		in.VoiceScope = "ark-cn-beijing"
+		_, err := e.svc.Create(ctx, in)
+		adminWantCode(t, err, errcode.ErrChannelInvalid.Code)
+		if len(e.repo.Audits) != 0 {
+			t.Fatalf("失败不该写审计：%v", e.repo.AuditActions())
+		}
+	})
+
+	t.Run("更新：改与清空都记进审计字段", func(t *testing.T) {
+		e := newAchEnv(t)
+		if _, err := e.svc.Create(ctx, createInput()); err != nil {
+			t.Fatal(err)
+		}
+		e.repo.Audits = nil
+
+		view, err := e.svc.Update(ctx, ChannelUpdateInput{Key: "main", VoiceScope: str("byteplus"), ActorID: 7})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if view.VoiceScope != provider.ScopeBytePlus {
+			t.Fatalf("应改成 byteplus，得到 %q", view.VoiceScope)
+		}
+		var d struct {
+			Fields []string `json:"fields"`
+		}
+		_ = json.Unmarshal(e.repo.Audits[0].DetailJSON, &d)
+		if len(d.Fields) != 1 || d.Fields[0] != "voice_scope" {
+			t.Fatalf("审计应只记 voice_scope：%s", e.repo.Audits[0].DetailJSON)
+		}
+
+		// 指向空串 = 改回「按 BaseURL 推断」
+		view, err = e.svc.Update(ctx, ChannelUpdateInput{Key: "main", VoiceScope: str("")})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if view.VoiceScope != "" {
+			t.Fatalf("应清空声明，得到 %q", view.VoiceScope)
+		}
+	})
+
+	t.Run("更新：非法取值拒掉且不改动渠道", func(t *testing.T) {
+		e := newAchEnv(t)
+		if _, err := e.svc.Create(ctx, createInput()); err != nil {
+			t.Fatal(err)
+		}
+		_, err := e.svc.Update(ctx, ChannelUpdateInput{Key: "main", VoiceScope: str("volcengine")})
+		adminWantCode(t, err, errcode.ErrChannelInvalid.Code)
+		if got, _ := e.svc.Get(ctx, "main"); got.VoiceScope != "" {
+			t.Fatalf("失败不该改动渠道：%+v", got)
+		}
+	})
+}

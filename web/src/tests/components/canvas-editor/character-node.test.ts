@@ -134,4 +134,15 @@ describe("voiceCell：封面下方声音格", () => {
   test("有声音：可试听", () => {
     expect(voiceCell(character({ voice: audio }))).toEqual({ kind: "audio", title: "声音" });
   });
+
+  test("绑的音色有名字：格子上写名字，老数据没有名字才退回「声音」", () => {
+    expect(voiceCell(character({ voice: { ...audio, name: "魅力女友" } }))).toEqual({
+      kind: "audio",
+      title: "魅力女友",
+    });
+    expect(voiceCell(character({ voice: { ...audio, name: "  " } }))).toEqual({
+      kind: "audio",
+      title: "声音",
+    });
+  });
 });

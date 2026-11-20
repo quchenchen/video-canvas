@@ -50,6 +50,11 @@ export function assetHasImage(asset: RefAsset): boolean {
   return !!asset.src && !asset.generating;
 }
 
+/** 角色卡上绑了音色：列表里标出来，否则有没有音色在资产库看起来一模一样 */
+export function hasVoice(asset: RefAsset): boolean {
+  return asset.kind === "character" && asset.character?.voice?.mode === "audio";
+}
+
 function Item({ asset, fade }: { asset: RefAsset; fade: boolean }) {
   const Icon = TYPE_ICON[asset.type];
   const noImage = !assetHasImage(asset);
@@ -79,6 +84,11 @@ function Item({ asset, fade }: { asset: RefAsset; fade: boolean }) {
         )}
       </span>
       <span className="min-w-0 flex-1 truncate">{asset.label}</span>
+      {hasVoice(asset) && (
+        <StatusPill tone="muted" className="h-4 max-w-24 truncate text-[10px]">
+          {asset.character?.voice?.name?.trim() || "音色"}
+        </StatusPill>
+      )}
       {noImage && (
         <StatusPill tone="warning" className="h-4 text-[10px]">
           {asset.type === "audio" ? "无音频" : "无图"}

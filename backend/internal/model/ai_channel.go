@@ -14,6 +14,7 @@ type AIChannel struct {
 	Sort          int       `gorm:"not null;default:100" json:"sort"`                                      // 渠道顺序，越小越靠前；用户看到的模型顺序 = 渠道顺序 + 渠道内顺序
 	Enabled       bool      `gorm:"not null;default:true" json:"enabled"`                                  // 停用后不再接新任务，进行中的任务按快照继续
 	FilingJSON    JSONText  `gorm:"column:filing_json;type:json;not null;default:'{}'" json:"filing_json"` // 虚拟人像库（方舟备案）配置 ChannelFiling；AK/SK 在 ai_secrets
+	VoiceScope    string    `gorm:"column:voice_scope;size:32;not null;default:''" json:"voice_scope"`     // 公开素材资源域：ark-cn / byteplus，空表示按 BaseURL 推断
 	UpdatedBy     uint64    `gorm:"not null;default:0" json:"updated_by"`                                  // 最后修改人
 	CreatedAt     time.Time `json:"created_at"`                                                            // 创建时间
 	UpdatedAt     time.Time `json:"updated_at"`                                                            // 更新时间

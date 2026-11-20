@@ -105,6 +105,9 @@ describe("planSegmentInput：@ 解析与参考素材组装（契约 §13）", ()
     expect(plan.errors).toEqual({});
     expect(plan.imageCount).toBe(3);
     expect(plan.imageMax).toBe(9);
+    // 角色卡音色也算素材：素材条据此显示「音频 n/上限」，不然音色带没带看不出来
+    expect(plan.audioCount).toBe(1);
+    expect(plan.audioMax).toBe(3);
     const linkedChar = plan.refs.find((ref) => ref.id === "n1");
     expect(linkedChar).toMatchObject({ state: "image", imageCount: 2, voice: "used" });
   });
@@ -446,5 +449,76 @@ describe("planSegmentInput：故事板作为第一张参考图", () => {
     const plan = planSegmentInput({ ...base, caps: video({ max: 2 }), prompt, assets, board });
     expect((plan.input.images as number[])[0]).toBe(31);
     expect(plan.errors.images).toContain("关掉故事板");
+  });
+});
+
+describe("planSegmentInput：音色跨域提示", () => {
+  const voiced = (scope?: string) =>
+    character("n1", {
+      character: roleData({
+        voice: {
+          mode: "audio",
+          assetId: "9",
+          src: "https://cdn/9",
+          origin: "library",
+          ...(scope ? { scope } : {}),
+        },
+      }),
+    });
+
+  test("音色与模型同域：不提示", () => {
+    const plan = planSegmentInput({
+      ...base,
+      caps: video(),
+      prompt: "@[林川](n1)",
+      assets: [voiced("ark-cn")],
+      voiceScope: "ark-cn",
+    });
+    expect(plan.voiceNotice).toBeNull();
+  });
+
+  test("跨域：提示按音频文件参考，且不阻断（errors 为空）", () => {
+    const plan = planSegmentInput({
+      ...base,
+      caps: video(),
+      prompt: "@[林川](n1)",
+      assets: [voiced("byteplus")],
+      voiceScope: "ark-cn",
+    });
+    expect(plan.voiceNotice).toContain("林川");
+    expect(plan.voiceNotice).toContain("不同域");
+    expect(plan.errors).toEqual({});
+    expect(plan.input.audios).toEqual([9]);
+  });
+
+  test("模型没有资源域（非 Seedance / 代理渠道）或音色不是公开音色：不提示", () => {
+    const noScope = planSegmentInput({
+      ...base,
+      caps: video(),
+      prompt: "@[林川](n1)",
+      assets: [voiced("byteplus")],
+    });
+    expect(noScope.voiceNotice).toBeNull();
+
+    const plain = planSegmentInput({
+      ...base,
+      caps: video(),
+      prompt: "@[林川](n1)",
+      assets: [voiced()],
+      voiceScope: "ark-cn",
+    });
+    expect(plain.voiceNotice).toBeNull();
+  });
+
+  test("音色没带进 input（模型不收音频）：不提示", () => {
+    const plan = planSegmentInput({
+      ...base,
+      caps: video({ audio: false }),
+      prompt: "@[林川](n1)",
+      assets: [voiced("byteplus")],
+      voiceScope: "ark-cn",
+    });
+    expect(plan.refs[0].voice).toBe("ignored");
+    expect(plan.voiceNotice).toBeNull();
   });
 });

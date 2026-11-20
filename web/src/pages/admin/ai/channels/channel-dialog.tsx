@@ -37,6 +37,7 @@ import { ADMIN_ERROR_CODE, errorMessage } from "@/utils/admin/errors";
 import { useAliveRef } from "../../use-admin";
 import { FilingSection } from "./filing-section";
 import { HeaderEditor } from "./header-editor";
+import { VoiceScopeSection } from "./voice-scope-section";
 
 /** 新增 / 编辑渠道弹窗的业务参数 */
 export type ChannelDialogProps = {
@@ -354,6 +355,12 @@ function ChannelForm({
             </FormField>
           </div>
         </div>
+
+        <VoiceScopeSection
+          value={form.voiceScope}
+          disabled={busy}
+          onChange={(voiceScope) => patch({ voiceScope })}
+        />
 
         {channel && showFilingSwitch(form.baseUrl, form.filingEnabled) && (
           <FilingSection

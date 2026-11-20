@@ -309,3 +309,65 @@ func TestAIConfigService_Registry_InvalidConfigIgnored(t *testing.T) {
 		t.Fatalf("解析失败的模型应被忽略：%+v", list)
 	}
 }
+
+// 公开素材资源域随模型清单下发（画布据此提示音色跨域），并冻结进任务快照（执行侧判定用同一份值）。
+func TestAIConfigService_Registry_VoiceScope(t *testing.T) {
+	ctx := context.Background()
+	svc, repo, _ := aicNewSvc()
+	aicSeedChannel(t, svc, repo, "c1", true)
+	aicEnableModel(t, svc, "m1", "c1")
+
+	scopeOf := func(t *testing.T) string {
+		t.Helper()
+		list, err := svc.ListModels(ctx, "video")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(list) != 1 {
+			t.Fatalf("期望 1 个模型，实际 %+v", list)
+		}
+		return list[0].VoiceScope
+	}
+
+	t.Run("没声明、域名也不是公开素材地址：空（音色只能按文件传）", func(t *testing.T) {
+		if got := scopeOf(t); got != "" {
+			t.Fatalf("期望空串，实际 %q", got)
+		}
+	})
+
+	t.Run("渠道声明优先：代理地址也能带上资源域", func(t *testing.T) {
+		repo.Channels["c1"].VoiceScope = provider.ScopeBytePlus
+		if err := svc.RefreshRegistry(ctx); err != nil {
+			t.Fatal(err)
+		}
+		if got := scopeOf(t); got != provider.ScopeBytePlus {
+			t.Fatalf("期望 %q，实际 %q", provider.ScopeBytePlus, got)
+		}
+		snap, err := svc.Snapshot(ctx, "m1")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if snap.Channel.VoiceScope != provider.ScopeBytePlus {
+			t.Fatalf("快照应冻结渠道声明：%+v", snap.Channel)
+		}
+	})
+
+	t.Run("没声明时按域名推断；声明与域名冲突时退化", func(t *testing.T) {
+		repo.Channels["c1"].BaseURL = "https://ark.cn-beijing.volces.com"
+		repo.Channels["c1"].VoiceScope = ""
+		if err := svc.RefreshRegistry(ctx); err != nil {
+			t.Fatal(err)
+		}
+		if got := scopeOf(t); got != provider.ScopeArkCN {
+			t.Fatalf("期望按域名推断 %q，实际 %q", provider.ScopeArkCN, got)
+		}
+
+		repo.Channels["c1"].VoiceScope = provider.ScopeBytePlus // 与域名冲突
+		if err := svc.RefreshRegistry(ctx); err != nil {
+			t.Fatal(err)
+		}
+		if got := scopeOf(t); got != "" {
+			t.Fatalf("冲突时应退化为空串，实际 %q", got)
+		}
+	})
+}

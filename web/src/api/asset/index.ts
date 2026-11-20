@@ -19,6 +19,12 @@ export const mapAsset = (raw: BackendAssetDto): AssetDto => ({
   height: positiveOrNull(raw.height),
   durationMs: positiveOrNull(raw.duration_ms ?? raw.durationMs),
   fileName: raw.file_name ?? raw.fileName ?? null,
+  thumbnailUrl: raw.thumbnail_url ?? "",
+  officialAssetId: raw.official_asset_id ?? "",
+  scope: raw.scope ?? "",
+  voiceAge: raw.voice_age ?? "",
+  voiceGender: raw.voice_gender ?? "",
+  voiceLang: raw.voice_lang ?? "",
 });
 
 /** 直传失败降级到中转时的提示；固定 id，同一时间只会出现一条 */

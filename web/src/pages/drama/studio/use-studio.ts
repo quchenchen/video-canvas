@@ -324,9 +324,20 @@ export function useStudioState(drama: Drama, no: number, refresh: () => Promise<
             assets,
             board,
             boardOff: prefs.boardOff,
+            voiceScope: video.model?.voice_scope,
           })
         : null,
-    [assets, board, caps, drama.ratio, prefs.boardOff, prefs.overrides, prompt, selected],
+    [
+      assets,
+      board,
+      caps,
+      drama.ratio,
+      prefs.boardOff,
+      prefs.overrides,
+      prompt,
+      selected,
+      video.model?.voice_scope,
+    ],
   );
   const credits = useMemo(() => {
     if (!plan || !video.model || Object.keys(plan.input).length === 0) return undefined;

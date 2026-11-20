@@ -182,6 +182,8 @@ export interface ChannelView {
   secret_key_set: boolean;
   /** 虚拟人像库（方舟真人素材备案）配置；旧后端没有这个字段 */
   filing?: ChannelFilingView;
+  /** 公开素材资源域：ark-cn（方舟国内站）/ byteplus（BytePlus 国际站）；空表示按 base_url 推断 */
+  voice_scope?: string;
   /** 最后修改人 */
   updated_by: number;
   /** 更新时间 */
@@ -219,6 +221,8 @@ export interface ChannelCreateRequest {
   headers?: Record<string, string>;
   rate_limit?: ChannelRateLimit;
   enabled?: boolean;
+  /** 公开素材资源域：ark-cn / byteplus；不传或空串表示按 base_url 推断 */
+  voice_scope?: string;
 }
 
 /** PUT /admin/ai/channels/:key 的请求体：字段都可选，不传表示不改；headers、filing 传了就整体替换 */

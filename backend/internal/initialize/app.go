@@ -158,6 +158,8 @@ func NewApp(cfg *config.Config) (*App, error) {
 	}
 	virtualHumanRepo := repository.NewVirtualHumanRepository(db)
 	filedAssets := service.NewFiledAssetResolver(virtualHumanRepo)
+	// 官方参考音色：Seedance 传 asset://<官方 ID>，其他模型用转存后的文件 URL（插件没标 filed 就不会走这里）。
+	filedAssets.WithOfficialAssets(assetRepo)
 	executor := plugin.New(plugin.Options{
 		Runner:      runnerClient,
 		Codes:       pluginCodeStore{repo: aiPluginRepo},

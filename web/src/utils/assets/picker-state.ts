@@ -3,8 +3,8 @@ import type { AssetKind } from "@/api/asset-library/type";
 
 import { ASSET_PICK_LIMIT, addPicked } from "./picker-selection";
 
-/** 弹框的来源：个人资产库、生成历史、真人库（只列图片） */
-export type PickerSource = "library" | "history" | "humans";
+/** 弹框的来源：个人资产库、生成历史、真人库（只列图片）、音色库（只列官方音频） */
+export type PickerSource = "library" | "history" | "humans" | "official";
 
 /** 弹框当前看的位置：来源、类型标签，个人资产库里还有所在文件夹 */
 export type PickerView = {

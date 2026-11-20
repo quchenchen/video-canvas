@@ -43,10 +43,18 @@ export type SegmentPlan = {
   /** input.images 里的张数与模型上限，参考素材条的「n/上限」 */
   imageCount: number;
   imageMax: number;
+  /** input.audios 里的条数与模型上限；角色卡音色就体现在这里 */
+  audioCount: number;
+  audioMax: number;
   /** 引用了已被删除的节点，存下来的名字 */
   deadLabels: string[];
   /** 故事板这次带没带、为什么 */
   board: BoardPlan;
+  /**
+   * 角色音色与所选视频模型不在同一公开素材资源域时的提示（跨域只能用音频文件，不会用 asset 引用）；
+   * 没有跨域音色为 null。
+   */
+  voiceNotice: string | null;
 };
 
 /**
@@ -227,6 +235,32 @@ export function pickVideoOp(
 }
 
 /**
+ * 角色音色与视频模型是否同域：公开音色的 asset ID 只在同一资源域内通用（方舟国内站 / BytePlus 各一套），
+ * 跨域时后端回退成音频文件地址，不报错但也不会用 asset 引用。这里只提示，不阻断。
+ * 模型没有资源域（非 Seedance、自建代理）或音色不是公开音色时都不提示。
+ * @param refs 参考素材条上的项
+ * @param assets 短剧资产（角色音色的 scope 记在 character.voice 上）
+ * @param modelScope 视频模型所属渠道的资源域
+ * @returns 一句提示；没有跨域音色为 null
+ */
+function voiceScopeNotice(
+  refs: readonly RefView[],
+  assets: readonly RefAsset[],
+  modelScope: string | undefined,
+): string | null {
+  if (!modelScope) return null;
+  const crossed = refs
+    .filter((view) => view.voice === "used")
+    .filter((view) => {
+      const scope = assets.find((asset) => asset.id === view.id)?.character?.voice?.scope;
+      return !!scope && scope !== modelScope;
+    })
+    .map((view) => view.label);
+  if (crossed.length === 0) return null;
+  return `${crossed.join("、")} 的音色与所选模型不同域，按音频文件参考（不使用 asset 引用）`;
+}
+
+/**
  * 组装片段「立即生成」的 input：
  * 提示词里 `@[名](节点id)` 解析成资产（角色卡展开主图 + 补充图为参考图、声音为参考音频），
  * 优先保留主图与声音，补充图按剩余容量添加；必要素材或声音未就绪时阻止提交。
@@ -243,6 +277,8 @@ export function planSegmentInput(args: {
   board?: BoardRef | null;
   /** 用户本次关掉了故事板 */
   boardOff?: boolean;
+  /** 所选视频模型的公开素材资源域（ModelInfo.voice_scope）；用来提示音色跨域 */
+  voiceScope?: string;
 }): SegmentPlan {
   const { caps, prompt } = args;
   const linked = linkRefs(prompt, args.assets);
@@ -300,15 +336,19 @@ export function planSegmentInput(args: {
     if (fit.adjusted) notices.push(`片段 ${args.seconds}s 超出模型范围，按 ${fit.value}s 生成`);
   }
   const images = built.input.images;
+  const refs = refViews(linked, bindings);
   return {
     op,
     input: built.input,
     errors: built.errors,
     notices,
-    refs: refViews(linked, bindings),
+    refs,
     imageCount: Array.isArray(images) ? images.length : 0,
     imageMax: caps?.refs?.image?.max ?? 0,
+    audioCount: Array.isArray(audios) ? audios.length : 0,
+    audioMax: caps?.refs?.audio?.max ?? 0,
     deadLabels: deadLabelsOf(linked),
     board,
+    voiceNotice: voiceScopeNotice(refs, args.assets, args.voiceScope),
   };
 }

@@ -126,6 +126,16 @@ func isHeaderToken(s string) bool {
 	return s != ""
 }
 
+// checkVoiceScope 校验公开素材资源域声明：只接受已知取值或空串（空 = 按 base_url 推断），规整成小写。
+// 返回规整后的值与问题描述。
+func checkVoiceScope(raw string) (string, string) {
+	scope := strings.ToLower(strings.TrimSpace(raw))
+	if !provider.ValidScope(scope) {
+		return "", "voice_scope 只能是 ark-cn（方舟国内站）、byteplus（BytePlus 国际站），或留空按 BaseURL 推断"
+	}
+	return scope, ""
+}
+
 // appendIf 非空才追加。
 func appendIf(list []string, s string) []string {
 	if s != "" {
