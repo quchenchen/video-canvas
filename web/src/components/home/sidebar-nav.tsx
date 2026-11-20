@@ -36,12 +36,12 @@ export function SidebarBrand({ to }: { to: string }) {
   return (
     <Link
       to={to}
-      aria-label="连镜"
+      aria-label="ScriptNow"
       className="focus-visible:ring-ring/50 flex min-w-0 items-center gap-2.5 rounded-md text-lg font-semibold tracking-wide outline-none focus-visible:ring-3"
     >
       <Logo size={30} />
-      <span className="font-display truncate font-black tracking-wide group-data-[collapsible=icon]:hidden">
-        连镜
+      <span className="font-display truncate font-black tracking-wide         group-data-[collapsible=icon]:hidden">
+        ScriptNow
       </span>
     </Link>
   );

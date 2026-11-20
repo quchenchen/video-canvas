@@ -109,7 +109,7 @@ function Workspace({ id }: { id: string }) {
     <FocusLoader
       icon={<Logo size={56} animated />}
       plainIcon
-      title="连镜"
+      title="ScriptNow"
       subtitle={drama ? `正在打开「${drama.title}」` : "正在打开短剧"}
       label={drama ? `正在打开短剧「${drama.title}」` : "正在打开短剧"}
       ready={!!value}
