@@ -37,7 +37,7 @@ module.exports = {
     apiVersion: 1,
     key: "doubao-video",
     name: "豆包（火山方舟） · 视频",
-    version: "1.3.0",
+    version: "1.3.1",
     vendor: "volcengine",
     description: "火山引擎豆包 Seedance 视频生成（异步）",
     auth: { type: "bearer" },
