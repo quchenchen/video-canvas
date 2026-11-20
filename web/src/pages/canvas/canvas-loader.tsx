@@ -20,7 +20,7 @@ export function CanvasLoader({
     <FocusLoader
       icon={<Logo size={56} animated />}
       plainIcon
-      title="连镜"
+      title="ScriptNow"
       subtitle={title ? `正在打开「${title}」` : "正在打开画布"}
       label={title ? `正在打开画布「${title}」` : "正在打开画布"}
       ready={ready}

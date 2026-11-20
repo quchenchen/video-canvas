@@ -106,7 +106,7 @@ export default function Login() {
   /** 登录 / 注册成功：带上想法，盖上欢迎过渡，稍后进首页（减少动态效果时立刻进） */
   const enter = (name: string) => {
     saveCarry(idea.trim());
-    setWelcome(name ? `欢迎，${name}` : "欢迎来到连镜");
+    setWelcome(name ? `欢迎，${name}` : "欢迎来到 ScriptNow");
     enterTimer.current = window.setTimeout(
       () => navigate(destination, { replace: true }),
       reducedMotion ? 0 : ENTER_MS,
@@ -149,7 +149,7 @@ export default function Login() {
       <header className="absolute inset-x-0 top-0 z-10 flex h-16 items-center justify-between px-4 md:h-18 md:px-8">
         <div className="flex items-center gap-2.5 text-lg font-semibold tracking-wide">
           <Logo size={32} bright />
-          连镜
+          ScriptNow
           <span className="border-stage-glass-border text-on-stage-muted ml-1 border-l pl-3 text-[13px] font-normal tracking-normal max-md:hidden">
             {BRAND_SLOGAN}
           </span>
@@ -206,7 +206,7 @@ export default function Login() {
           <IdeaDock
             open={cardOpen}
             idea={idea}
-            title={activeMode === "login" ? "登录" : "加入连镜"}
+            title={activeMode === "login" ? "登录" : "加入 ScriptNow"}
             onIdeaChange={setIdea}
             onStart={() => openCard(registerOpen ? "register" : "login")}
             onClose={closeCard}

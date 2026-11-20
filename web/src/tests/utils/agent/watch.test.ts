@@ -179,8 +179,8 @@ describe("标签页标题前缀", () => {
   });
 
   test("拼到画布标题前面", () => {
-    expect(canvasPageTitle("雨夜短片", "⏸ 待批准 · ")).toBe("⏸ 待批准 · 雨夜短片 - 连镜");
-    expect(canvasPageTitle("雨夜短片")).toBe("雨夜短片 - 连镜");
+    expect(canvasPageTitle("雨夜短片", "⏸ 待批准 · ")).toBe("⏸ 待批准 · 雨夜短片 - ScriptNow");
+    expect(canvasPageTitle("雨夜短片")).toBe("雨夜短片 - ScriptNow");
   });
 });
 
