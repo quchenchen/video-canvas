@@ -38,13 +38,16 @@ func (s *AgentCanvasService) ComposePlan(ctx context.Context, run *model.AgentRu
 	return canvasgraph.ComposePlanOf(g, nodeID)
 }
 
+// composeArgs 是 canvas_compose 的参数：只给节点和动作，素材序列由服务端现算。
+type composeArgs struct {
+	NodeID string `json:"nodeId"`
+	Action string `json:"action"`
+}
+
 // toolCompose 把成片节点（或分镜表）里的视频拼成一条 mp4 并挂回节点。
 // 素材序列由画布现算：模型看不到素材 id，也不该由它拼。
 func (b *AgentBridge) toolCompose(ctx context.Context, tc *toolCall) (*toolOut, error) {
-	var a struct {
-		NodeID string `json:"nodeId"`
-		Action string `json:"action"`
-	}
+	var a composeArgs
 	if err := json.Unmarshal(tc.args, &a); err != nil {
 		return nil, fail("参数格式不对：%v", err)
 	}
@@ -66,16 +69,39 @@ func (b *AgentBridge) toolCompose(ctx context.Context, tc *toolCall) (*toolOut, 
 		return nil, fail("这个节点还没有可拼的视频：%d 段全部没出片", len(plan.Segments))
 	}
 	// 同一节点已经有任务在跑就直接等它；同样素材、同样顺序已经出过片就不重复合成
-	if cur, err := b.d.Compose.Active(ctx, tc.run.UserID, tc.run.CanvasID, plan.NodeID, ids); err == nil && cur != nil {
-		switch cur.Status {
-		case model.ComposeJobQueued, model.ComposeJobRunning:
-			return b.composeWaitFor(ctx, tc, cur, plan)
-		case model.ComposeJobSucceeded:
-			if cur.Stale != nil && !*cur.Stale {
-				return b.composeOut(cur, plan, true)
-			}
+	if out, ok, rerr := b.composeReuse(ctx, tc, plan, ids); ok {
+		return out, rerr
+	}
+	return b.composeSubmit(ctx, tc, plan, ids)
+}
+
+// composeReuse 处理「已经有任务」的情况：进行中的等它跑完，同素材同序成功的直接复用。
+// 第三个返回值表示是否已经处理掉，没有可复用的任务时返回 false，交给调用方提交新任务。
+func (b *AgentBridge) composeReuse(
+	ctx context.Context, tc *toolCall, plan *canvasgraph.ComposePlan, ids []string,
+) (*toolOut, bool, error) {
+	cur, err := b.d.Compose.Active(ctx, tc.run.UserID, tc.run.CanvasID, plan.NodeID, ids)
+	if err != nil || cur == nil {
+		return nil, false, nil
+	}
+	switch cur.Status {
+	case model.ComposeJobQueued, model.ComposeJobRunning:
+		out, werr := b.composeWaitFor(ctx, tc, cur, plan)
+		return out, true, werr
+	case model.ComposeJobSucceeded:
+		// 素材顺序没变才复用；节点内容变了（Stale）就重新拼
+		if cur.Stale != nil && !*cur.Stale {
+			out, oerr := b.composeOut(cur, plan, true)
+			return out, true, oerr
 		}
 	}
+	return nil, false, nil
+}
+
+// composeSubmit 提交一条合成任务并等它：被界面抢先提交时不重复提交，转去等那条任务。
+func (b *AgentBridge) composeSubmit(
+	ctx context.Context, tc *toolCall, plan *canvasgraph.ComposePlan, ids []string,
+) (*toolOut, error) {
 	mode := "compose"
 	if plan.Kind == canvasgraph.KindStoryboard {
 		mode = "storyboard"
@@ -87,9 +113,8 @@ func (b *AgentBridge) toolCompose(ctx context.Context, tc *toolCall) (*toolOut, 
 		var ec *errcode.Error
 		if errors.As(err, &ec) && ec.Code == errcode.ErrCanvasComposeBusy.Code {
 			// 刚好被用户在界面上抢了先：转成等待那条任务，不重复提交
-			cur, aerr := b.d.Compose.Active(ctx, tc.run.UserID, tc.run.CanvasID, plan.NodeID, ids)
-			if aerr == nil && cur != nil {
-				return b.composeWaitFor(ctx, tc, cur, plan)
+			if out, ok, werr := b.composeReuse(ctx, tc, plan, ids); ok {
+				return out, werr
 			}
 		}
 		return nil, fail("%v", err)

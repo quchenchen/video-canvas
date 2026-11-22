@@ -24,61 +24,98 @@ type MediaRef struct {
 // 产物非空就只认产物，产物为空时老节点的那份 assetId 当成唯一一版。
 func MediaRefs(n Node) []MediaRef {
 	d := n.Data()
-	out := make([]MediaRef, 0, 4)
-	seen := make(map[string]bool, 4)
-	add := func(id, kind string, final bool, shot int) {
-		if id == "" || id == "0" || seen[id] {
-			return
-		}
-		switch kind {
-		case MediaImage, MediaVideo, MediaAudio:
-		default:
-			kind = MediaImage
-		}
-		seen[id] = true
-		out = append(out, MediaRef{AssetID: id, Kind: kind, Final: final, Shot: shot})
+	c := &mediaCollector{
+		out:      make([]MediaRef, 0, 4),
+		seen:     make(map[string]bool, 4),
+		nodeKind: n.Kind(),
 	}
-	// 节点的种类可以当素材种类的兜底：视频节点的产物就是视频，图片节点的就是图片
-	nodeKind := n.Kind()
+	c.collectOutputs(d)
+	c.collectLegacyAsset(d)
+	c.collectFinal(d)
+	c.collectCharacter(d)
+	c.collectShots(d)
+	return c.out
+}
+
+// mediaCollector 边收集边按素材 id 去重：同一个素材在产物和旧字段里都出现时只留一份。
+type mediaCollector struct {
+	out      []MediaRef
+	seen     map[string]bool
+	nodeKind string
+}
+
+// add 记一个素材；id 为空或已经收过就跳过，种类不认识时按图片兜底。
+func (c *mediaCollector) add(id, kind string, final bool, shot int) {
+	if id == "" || id == "0" || c.seen[id] {
+		return
+	}
+	switch kind {
+	case MediaImage, MediaVideo, MediaAudio:
+	default:
+		kind = MediaImage
+	}
+	c.seen[id] = true
+	c.out = append(c.out, MediaRef{AssetID: id, Kind: kind, Final: final, Shot: shot})
+}
+
+// addWithNodeKind 在种类没写时用节点种类兜底：视频节点的产物就是视频，图片节点的就是图片。
+func (c *mediaCollector) addWithNodeKind(id, kind string) {
+	if kind == "" {
+		kind = c.nodeKind
+	}
+	c.add(id, kind, false, 0)
+}
+
+// collectOutputs 收历次产物（旧 → 新）。
+func (c *mediaCollector) collectOutputs(d map[string]any) {
 	for _, o := range readOutputs(d) {
-		kind := str(o["mediaType"])
-		if kind == "" {
-			kind = nodeKind
-		}
-		add(str(o["assetId"]), kind, false, 0)
+		c.addWithNodeKind(str(o["assetId"]), str(o["mediaType"]))
 	}
-	if id := str(d["assetId"]); id != "" && !seen[id] {
-		kind := str(d["mediaType"])
-		if kind == "" {
-			kind = nodeKind
-		}
-		add(id, kind, false, 0)
+}
+
+// collectLegacyAsset 收老节点上的 assetId 镜像：没有产物时它就是唯一一版。
+func (c *mediaCollector) collectLegacyAsset(d map[string]any) {
+	if id := str(d["assetId"]); id != "" {
+		c.addWithNodeKind(id, str(d["mediaType"]))
 	}
-	add(str(d["finalAssetId"]), MediaVideo, true, 0)
-	if ch, ok := d["character"].(map[string]any); ok {
-		if extras, ok := ch["extras"].([]any); ok {
-			for _, item := range extras {
-				if m, ok := item.(map[string]any); ok {
-					add(str(m["assetId"]), MediaImage, false, 0)
-				}
-			}
-		}
-		if voice, ok := ch["voice"].(map[string]any); ok {
-			add(str(voice["assetId"]), MediaAudio, false, 0)
-		}
+}
+
+// collectFinal 收成片节点的 finalAssetId。
+func (c *mediaCollector) collectFinal(d map[string]any) {
+	c.add(str(d["finalAssetId"]), MediaVideo, true, 0)
+}
+
+// collectCharacter 收角色卡的补充图与绑定的声音。
+func (c *mediaCollector) collectCharacter(d map[string]any) {
+	ch, ok := d["character"].(map[string]any)
+	if !ok {
+		return
 	}
-	if sb, ok := d["storyboard"].(map[string]any); ok {
-		if shots, ok := sb["shots"].([]any); ok {
-			for i, item := range shots {
-				m, ok := item.(map[string]any)
-				if !ok {
-					continue
-				}
-				if img, ok := m["image"].(map[string]any); ok {
-					add(str(img["assetId"]), MediaImage, false, i+1)
-				}
-			}
+	extras, _ := ch["extras"].([]any)
+	for _, item := range extras {
+		if m, ok := item.(map[string]any); ok {
+			c.add(str(m["assetId"]), MediaImage, false, 0)
 		}
 	}
-	return out
+	if voice, ok := ch["voice"].(map[string]any); ok {
+		c.add(str(voice["assetId"]), MediaAudio, false, 0)
+	}
+}
+
+// collectShots 收分镜表里旧的手传分镜图，带上镜号。
+func (c *mediaCollector) collectShots(d map[string]any) {
+	sb, ok := d["storyboard"].(map[string]any)
+	if !ok {
+		return
+	}
+	shots, _ := sb["shots"].([]any)
+	for i, item := range shots {
+		m, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		if img, ok := m["image"].(map[string]any); ok {
+			c.add(str(img["assetId"]), MediaImage, false, i+1)
+		}
+	}
 }

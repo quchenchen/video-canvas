@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"io"
 	"path"
-	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -197,143 +196,12 @@ func (s *CanvasArchiveService) Plan(ctx context.Context, userID, canvasID uint64
 		FileName:  archiveFileName(c.Title, c.Revision, now),
 	}
 
-	// 节点按画布位置排（上→下、同高左→右、最后按 id 定死），和画布上的阅读顺序一致；组节点只是框，自己不带内容。
-	nodes := make([]canvasgraph.Node, 0, len(g.Nodes))
-	for _, n := range g.Nodes {
-		if !n.IsGroup() {
-			nodes = append(nodes, n)
-		}
+	b := newArchiveBuilder(ctx, s, userID, a)
+	for _, n := range archiveNodes(g) {
+		b.collect(n)
 	}
-	slices.SortStableFunc(nodes, archiveNodeOrder)
+	assignArchivePaths(a, b.buckets)
 
-	buckets := make(map[string][]*archiveBucket, len(archiveGroupOrder))
-	index := make(map[string]map[string]*archiveBucket, len(archiveGroupOrder))
-	// add 取（或新建）某节点在某分组下的目录桶，桶的顺序就是遇到节点的顺序
-	add := func(group string, n canvasgraph.Node) *archiveBucket {
-		if index[group] == nil {
-			index[group] = make(map[string]*archiveBucket, 4)
-		}
-		if b, ok := index[group][n.ID()]; ok {
-			return b
-		}
-		b := &archiveBucket{node: n}
-		index[group][n.ID()] = b
-		buckets[group] = append(buckets[group], b)
-		return b
-	}
-
-	for _, n := range nodes {
-		// 1) 文字类节点：剧本原文、分镜表、角色设定——这些东西不打包就等于把创作过程丢在平台里。
-		// 文件名在第 3 步按节点标题统一生成，这里只带扩展名。
-		switch n.Kind() {
-		case canvasgraph.KindScript:
-			if body := strings.TrimSpace(canvasgraph.Body(n)); body != "" {
-				b := add(archiveGroupScript, n)
-				b.items = append(b.items, ArchiveEntry{
-					Ext: ".txt", Text: canvasgraph.Body(n),
-					Spec: archiveWordsText(canvasgraph.Body(n)),
-				})
-			}
-		case canvasgraph.KindStoryboard:
-			shots := canvasgraph.Shots(n)
-			if len(shots) > 0 {
-				b := add(archiveGroupBoard, n)
-				b.items = append(b.items,
-					ArchiveEntry{Ext: ".md", Text: renderBoardMD(shots), Spec: archiveBoardSpec(shots)},
-					ArchiveEntry{Ext: ".csv", Text: renderBoardCSV(shots), Spec: archiveBoardSpec(shots)},
-				)
-			}
-		case canvasgraph.KindCharacter:
-			if info, ok := canvasgraph.CharacterOf(n); ok && strings.TrimSpace(info.Description+info.VoicePrompt) != "" {
-				b := add(archiveGroupRole, n)
-				b.items = append(b.items, ArchiveEntry{
-					Ext: ".md", Text: renderRoleMD(n, info),
-					Spec: archiveRoleSpec(info),
-				})
-			}
-		}
-
-		// 2) 媒体：一次引用可能查不到（素材被删 / 别人家的），记进 skipped 而不是让整包失败
-		for _, ref := range canvasgraph.MediaRefs(n) {
-			id, convErr := strconv.ParseUint(ref.AssetID, 10, 64)
-			if convErr != nil {
-				a.Skipped = append(a.Skipped, ArchiveSkip{Node: n.Label(), Reason: "素材编号无法识别"})
-				continue
-			}
-			item, getErr := s.assets.Get(ctx, userID, id)
-			if getErr != nil {
-				a.Skipped = append(a.Skipped, ArchiveSkip{Node: n.Label(), Reason: "素材不存在或已删除"})
-				continue
-			}
-			b := add(archiveGroupOf(ref, item), n)
-			b.items = append(b.items, ArchiveEntry{
-				Ext: archiveExt(item), Final: ref.Final, Shot: ref.Shot, Asset: item,
-			})
-		}
-	}
-
-	// 3) 分配目录与文件名：只有多份产物（历次版本、每镜手传图）才建「NN_节点名」目录，
-	//    单份产物（一个剧本、一段单版本视频、一条成片）直接放在分组下——
-	//    否则会出现「分镜表/01_分镜表/分镜表.md」这种目录名与文件名完全重复的多余层级。
-	for _, group := range archiveGroupOrder {
-		// 同一分组下已经是扁平文件的占用表；同名节点靠 -2、-3 区分
-		used := make(map[string]bool, len(buckets[group]))
-		// 目录序号只数真正建了目录的节点，免得扁平节点把 01、02 占了还空出来
-		nestedIndex := 0
-		for _, b := range buckets[group] {
-			// 文本条目固定导出 md（+csv）两份，不按数量判断，永远扁平
-			nested := len(b.items) > 1 && b.items[0].Asset != nil
-			dir := group
-			if nested {
-				nestedIndex++
-				dir = path.Join(group, fmt.Sprintf("%02d_%s", nestedIndex, archiveDirName(b.node)))
-			}
-			versions := 0
-			for _, it := range b.items {
-				if it.Asset != nil && !it.Final && it.Shot == 0 {
-					versions++
-				}
-			}
-			base := archiveBaseName(b.node, group)
-			version := 0
-			for j := range b.items {
-				it := &b.items[j]
-				it.Group, it.Dir, it.NodeID, it.Node = group, dir, b.node.ID(), b.node.Label()
-				if it.Asset == nil {
-					// 文本文件名就是节点标题：剧本/第一场.txt、分镜表/分镜表.md + .csv
-					it.Name = archiveUnique(base+it.Ext, used)
-					a.Entries = append(a.Entries, *it)
-					a.TotalBytes += it.Size()
-					continue
-				}
-				switch {
-				case nested && it.Final:
-					it.Name = "成片" + it.Ext
-				case nested && it.Shot > 0:
-					it.Name = fmt.Sprintf("第%02d镜%s", it.Shot, it.Ext)
-				case nested:
-					version++
-					it.Version, it.Versions = version, versions
-					it.Name = fmt.Sprintf("v%d%s", version, it.Ext)
-				default:
-					// 单份产物：文件名直接用节点标题，不再套一层同名目录
-					name := base
-					switch {
-					case it.Final:
-						// 成片就是这一次的输出，不参与 v1、v2 编号
-					case it.Shot > 0:
-						// 分镜手传图要留住镜号，否则一堆图摆在「图片」下分不清是哪一镜
-						name = fmt.Sprintf("%s_第%02d镜", base, it.Shot)
-					default:
-						it.Version, it.Versions = 1, 1
-					}
-					it.Name = archiveUnique(name+it.Ext, used)
-				}
-				a.Entries = append(a.Entries, *it)
-				a.TotalBytes += it.Size()
-			}
-		}
-	}
 	if len(a.Entries) == 0 {
 		return nil, errcode.ErrCanvasArchiveEmpty
 	}
