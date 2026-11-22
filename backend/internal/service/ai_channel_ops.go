@@ -6,8 +6,11 @@ import (
 	"fmt"
 	"strings"
 
+	"go.uber.org/zap"
+
 	"video-canvas/internal/model"
 	"video-canvas/internal/pkg/errcode"
+	"video-canvas/internal/pkg/logger"
 	"video-canvas/internal/provider"
 	"video-canvas/internal/repository"
 )
@@ -15,18 +18,43 @@ import (
 // 拉取与导入的限制。
 const maxImportModels = 500 // 单次导入的模型数上限；一般用不到，超出时提示分两次导入
 
-// SetSecret 设置渠道 API Key（存 ai_secrets，名字固定为 channel:<key>），只写。审计只记“谁在什么时候改了哪个渠道的 Key”，不含值。
+// SetSecret 设置渠道「主 Key」（存 ai_secrets，只写）。多 Key 渠道里主 Key 就是最小槽位的那把；
+// 还没有槽位行的渠道先补一个槽位 1（凭证名沿用历史的 channel:<key>，升级后行为不变）。
+// 审计只记“谁在什么时候改了哪个渠道的 Key”，不含值。
 func (s *AIChannelService) SetSecret(ctx context.Context, actorID uint64, key, value string) error {
 	// 1. 渠道必须存在：否则会往 ai_secrets 里写出没有主人的凭证
 	if _, err := s.load(ctx, key); err != nil {
 		return err
 	}
-	// 2. 加密入库（空值、超长、没有主密钥等错误由凭证服务给出）
-	if err := s.secrets.SetSecret(ctx, model.ChannelSecretName(key), value, actorID); err != nil {
+	// 2. 定位主 Key；没有槽位行就先建一条（AddChannelKey 会分配下一个槽位，空表就是 1）
+	slot, name, err := s.primaryKey(ctx, key)
+	if err != nil {
 		return err
 	}
-	// 3. 审计：detail 故意为空
+	if slot == 0 {
+		row := &model.AIChannelKey{ChannelKey: key, Hint: hintOf(value), Remark: "", Enabled: true}
+		if err := s.repo.AddChannelKey(ctx, row); err != nil {
+			if errors.Is(err, repository.ErrNotFound) {
+				return errcode.ErrChannelNotFound
+			}
+			return err
+		}
+		slot, name = row.Slot, model.ChannelKeySecretName(key, row.Slot)
+	}
+	// 3. 加密入库（空值、超长、没有主密钥等错误由凭证服务给出）
+	if err := s.secrets.SetSecret(ctx, name, value, actorID); err != nil {
+		return err
+	}
+	// 4. 末四位跟着换：只用于辨认，写不进去不影响 Key 已生效
+	if h := hintOf(value); h != "" {
+		if err := s.repo.SetChannelKeyHint(ctx, key, slot, h); err != nil {
+			logger.Warn("更新渠道 Key 末四位失败", zap.String("channel", key), zap.Int("slot", slot), zap.Error(err))
+		}
+	}
+	// 5. 审计：detail 故意为空
 	aiAudit(ctx, s.audit, actorID, model.AuditChannelSecret, model.AuditTargetChannel, key, nil)
+	s.secrets.ForgetChannelSlots(key)
+	s.notifyChanged(ctx, "channel secret "+key)
 	return nil
 }
 
@@ -115,14 +143,19 @@ func (s *AIChannelService) upstreamAccess(ctx context.Context, key string) (prov
 	if s.lister == nil {
 		return provider.ChannelSnapshot{}, "", errcode.ErrInternal.WithMsg("拉取模型功能未启用")
 	}
-	set, err := s.secrets.SecretIsSet(ctx, model.ChannelSecretName(key))
+	// 多 Key 渠道用主 Key（最小槽位里第一把启用的）；单 Key 渠道与升级前的数据行为不变
+	name, err := s.primarySecretName(ctx, key)
+	if err != nil {
+		return provider.ChannelSnapshot{}, "", err
+	}
+	set, err := s.secrets.SecretIsSet(ctx, name)
 	if err != nil {
 		return provider.ChannelSnapshot{}, "", err
 	}
 	if !set {
 		return provider.ChannelSnapshot{}, "", errcode.ErrChannelSecretUnset.WithMsg(fmt.Sprintf("渠道 %q 的 API Key 尚未设置，请先设置 Key", key))
 	}
-	apiKey, err := s.secrets.Get(ctx, model.ChannelSecretName(key))
+	apiKey, err := s.secrets.Get(ctx, name)
 	if err != nil {
 		return provider.ChannelSnapshot{}, "", err
 	}

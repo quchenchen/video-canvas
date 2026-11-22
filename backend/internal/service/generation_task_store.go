@@ -115,7 +115,7 @@ func (s *GenerationTaskService) MarkSubmitting(ctx context.Context, t *model.Gen
 }
 
 // MarkSubmitted 记录异步任务已被上游受理，并从受理时刻起重新计算生成超时。
-func (s *GenerationTaskService) MarkSubmitted(ctx context.Context, t *model.GenerationTask, providerTaskID string, pluginState json.RawMessage, nextPollAt time.Time) (bool, error) {
+func (s *GenerationTaskService) MarkSubmitted(ctx context.Context, t *model.GenerationTask, providerTaskID string, pluginState json.RawMessage, keySlot string, nextPollAt time.Time) (bool, error) {
 	now := s.now()
 	fields := map[string]any{
 		"status":           model.TaskQueued,
@@ -126,8 +126,8 @@ func (s *GenerationTaskService) MarkSubmitted(ctx context.Context, t *model.Gene
 		"lease_until":      nil,
 	}
 	s.restartDeadline(t, now, fields)
-	if len(pluginState) > 0 {
-		raw, err := mergeProviderState(t.ProviderState, provider.ProviderState{Plugin: pluginState})
+	if len(pluginState) > 0 || keySlot != "" {
+		raw, err := mergeProviderState(t.ProviderState, provider.ProviderState{Plugin: pluginState, KeySlot: keySlot})
 		if err != nil {
 			return false, err
 		}
@@ -142,7 +142,7 @@ func (s *GenerationTaskService) MarkSubmitted(ctx context.Context, t *model.Gene
 }
 
 // MarkImmediate 记录同步接口的即时结果并进入转存阶段。
-func (s *GenerationTaskService) MarkImmediate(ctx context.Context, t *model.GenerationTask, providerTaskID string, pluginState json.RawMessage, outputs json.RawMessage) (bool, error) {
+func (s *GenerationTaskService) MarkImmediate(ctx context.Context, t *model.GenerationTask, providerTaskID string, pluginState json.RawMessage, keySlot string, outputs json.RawMessage) (bool, error) {
 	now := s.now()
 	fields := map[string]any{
 		"status":           model.TaskFinalizing,
@@ -154,8 +154,8 @@ func (s *GenerationTaskService) MarkImmediate(ctx context.Context, t *model.Gene
 	}
 	// 转存窗口是 deadline_at + TransferGrace：同样从上游出结果的时刻重新算，别让排队时间挤掉转存的余量
 	s.restartDeadline(t, now, fields)
-	if len(pluginState) > 0 {
-		raw, err := mergeProviderState(t.ProviderState, provider.ProviderState{Plugin: pluginState})
+	if len(pluginState) > 0 || keySlot != "" {
+		raw, err := mergeProviderState(t.ProviderState, provider.ProviderState{Plugin: pluginState, KeySlot: keySlot})
 		if err != nil {
 			return false, err
 		}
@@ -543,6 +543,11 @@ func mergeProviderState(raw []byte, next provider.ProviderState) ([]byte, error)
 	}
 	if len(next.Plugin) > 0 {
 		current.Plugin = next.Plugin
+	}
+	// 多 Key 渠道提交时用的那把 Key 必须跟着任务走：查询 / 取消要复用同一把，
+	// 否则上游按 Key 隔离时会查不到自己提交的任务。
+	if next.KeySlot != "" {
+		current.KeySlot = next.KeySlot
 	}
 	out, err := json.Marshal(current)
 	if err != nil {

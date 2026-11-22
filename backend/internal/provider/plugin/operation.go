@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"net/url"
 	"strings"
 	"time"
@@ -35,6 +36,8 @@ type operation struct {
 	dryRun       bool
 	secret       string
 	secretLoaded bool
+	keyNames     []string                // 这个渠道可用的 Key 凭证名（启用的槽位，按槽位升序）；懒解析，nil 表示还没取
+	keyName      string                  // 本次请求实际用的凭证名：冷却反馈要按它记
 	inlineImages []inlineImage           // 最近一次 image_json 响应解码出的图片，按 asset_index 排列，解析成功后才保存
 	savedImages  map[int]provider.Output // 已保存的内联图片，按 asset_index 索引
 	asset        *provider.Output        // 最近一次 binary 响应落库的素材，产物 {type:"asset"} 用它补全
@@ -78,7 +81,10 @@ func (o *operation) needsSecretUpfront() bool {
 	return o.wantsCredentials()
 }
 
-// loadSecret 取渠道 Key 并登记脱敏；DryRun 不解析凭证，一律用 ***。
+// loadSecret 取本次请求要用的渠道 Key 并登记脱敏；DryRun 不解析凭证，一律用 ***。
+//
+// 多 Key 渠道：任务已经绑定过槽位（task.KeySlot）就用同一把——提交、查询、取消必须同 Key，
+// 否则上游按 Key 隔离时会查不到自己提交的任务；首次提交时按渠道轮转挑一把。
 func (o *operation) loadSecret(ctx context.Context) (string, error) {
 	if o.secretLoaded {
 		return o.secret, nil
@@ -90,15 +96,70 @@ func (o *operation) loadSecret(ctx context.Context) (string, error) {
 	if o.e.opts.Secrets == nil {
 		return "", terminalErr(codeHostMisconfigured, "宿主未配置凭证解析器", nil)
 	}
-	s, err := o.e.opts.Secrets.Get(ctx, model.ChannelSecretName(o.rt.Channel.Key))
+	names, err := o.resolveKeyNames(ctx)
+	if err != nil {
+		return "", err
+	}
+	name := o.e.pools.get(o.rt.Channel.Key).pick(names, o.task.KeySlot, o.e.opts.Now())
+	if name == "" {
+		return "", terminalErr(codeSecretUnavailable, fmt.Sprintf("渠道 %s 没有可用的 Key", o.rt.Channel.Key), nil)
+	}
+	s, err := o.e.opts.Secrets.Get(ctx, name)
 	if err != nil || s == "" {
 		// 凭证取不到是配置问题，重试没有意义；错误信息只带渠道名，不带任何明文
 		return "", terminalErr(codeSecretUnavailable, fmt.Sprintf("渠道 %s 的 Key 未设置或无法读取", o.rt.Channel.Key), redactError(err, o.red.str))
 	}
-	o.secret, o.secretLoaded = s, true
+	o.secret, o.secretLoaded, o.keyName = s, true, name
 	o.red.add(s)
 	return s, nil
 }
+
+// resolveKeyNames 解析渠道可用的 Key 凭证名：实现了 provider.SecretSlotResolver 就按槽位取（多 Key），
+// 否则退回单 Key（channel:<渠道 key>），单 Key 渠道的行为与加多 Key 之前完全一致。
+func (o *operation) resolveKeyNames(ctx context.Context) ([]string, error) {
+	if o.keyNames != nil {
+		return o.keyNames, nil
+	}
+	if lister, ok := o.e.opts.Secrets.(provider.SecretSlotResolver); ok {
+		names, err := lister.SecretSlots(ctx, o.rt.Channel.Key)
+		if err != nil {
+			return nil, terminalErr(codeSecretUnavailable, fmt.Sprintf("渠道 %s 的 Key 列表读取失败", o.rt.Channel.Key), redactError(err, o.red.str))
+		}
+		if len(names) > 0 {
+			o.keyNames = names
+			return names, nil
+		}
+	}
+	o.keyNames = []string{model.ChannelSecretName(o.rt.Channel.Key)}
+	return o.keyNames, nil
+}
+
+// coolKeyForStatus 按上游响应让本次用的 Key 冷却一段时间：429 限流退一阵，401/403 失效退久一点，
+// 余额不足也先退（换一把可能还有额度）。单 Key 渠道冷却不影响正确性（pick 会回退到唯一一把）。
+func (o *operation) coolKeyForStatus(status int, class provider.ErrorClass) {
+	if o.keyName == "" || o.dryRun {
+		return
+	}
+	var d time.Duration
+	switch {
+	case status == http.StatusUnauthorized || status == http.StatusForbidden:
+		d = keyCooldownAuth
+	case status == http.StatusTooManyRequests:
+		d = keyCooldownRateLimit
+	case class == provider.ClassProviderBalance:
+		d = keyCooldownBalance
+	default:
+		return
+	}
+	o.e.pools.get(o.rt.Channel.Key).cool(o.keyName, o.e.opts.Now().Add(d))
+}
+
+// Key 冷却时长：限流是短暂的，失效与余额问题要人去处理，退得久一些。
+const (
+	keyCooldownRateLimit = 30 * time.Second
+	keyCooldownAuth      = 10 * time.Minute
+	keyCooldownBalance   = 5 * time.Minute
+)
 
 // loadSecretKey 取渠道的 Secret Key（可选的第二凭证）并登记脱敏；没设置或取不到返回空串，不算错误。
 func (o *operation) loadSecretKey(ctx context.Context) string {

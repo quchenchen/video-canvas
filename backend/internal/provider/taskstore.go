@@ -38,10 +38,12 @@ type TaskStore interface {
 	// 同步接口（生图等）在上游返回前一直是 pending，不记这一步用户会一直看到排队中。
 	MarkSubmitting(ctx context.Context, t *model.GenerationTask) (bool, error)
 	// MarkSubmitted pending → queued，记录上游任务 id 与插件 state（pluginState 为 nil 表示不变），安排第一次查询。
-	MarkSubmitted(ctx context.Context, t *model.GenerationTask, providerTaskID string, pluginState json.RawMessage, nextPollAt time.Time) (bool, error)
+	// keySlot 是这次提交用的渠道 Key 凭证名（单 Key 渠道为空），要和插件 state 一起落库，查询与取消复用它。
+	MarkSubmitted(ctx context.Context, t *model.GenerationTask, providerTaskID string, pluginState json.RawMessage, keySlot string, nextPollAt time.Time) (bool, error)
 	// MarkImmediate pending → finalizing：提交即成功（同步接口）。outputs（[]Output 的 JSON）写进 provider_result，
-	// 之后 finalizing 直接用它转存，不再调用上游；pluginState 为 nil 表示不变。立即安排转存（next_poll_at = 现在并唤醒 worker）。
-	MarkImmediate(ctx context.Context, t *model.GenerationTask, providerTaskID string, pluginState json.RawMessage, outputs json.RawMessage) (bool, error)
+	// 之后 finalizing 直接用它转存，不再调用上游；pluginState 为 nil 表示不变。keySlot 同 MarkSubmitted。
+	// 立即安排转存（next_poll_at = 现在并唤醒 worker）。
+	MarkImmediate(ctx context.Context, t *model.GenerationTask, providerTaskID string, pluginState json.RawMessage, keySlot string, outputs json.RawMessage) (bool, error)
 	// MarkPolled 记录一次查询结果（queued / running）与新的插件 state（nil 表示不变），安排下一次查询。
 	MarkPolled(ctx context.Context, t *model.GenerationTask, status string, progress *int, pluginState json.RawMessage, attempts int, nextPollAt time.Time) (bool, error)
 	// MarkFinalizing queued / running → finalizing，立即转存。

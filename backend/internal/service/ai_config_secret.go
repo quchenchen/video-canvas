@@ -194,3 +194,57 @@ func (s *AIConfigService) Get(ctx context.Context, name string) (string, error) 
 	s.secMu.Unlock()
 	return plain, nil
 }
+
+// aiSlotCacheTTL 是渠道 Key 槽位名的缓存时长：增删 Key 会精确失效（ForgetChannelSlots），
+// 这里只是避免轮询把槽位查询打热。
+const aiSlotCacheTTL = 5 * time.Second
+
+// aiSlotCacheItem 是槽位名列表的缓存项。
+type aiSlotCacheItem struct {
+	names   []string
+	expires time.Time
+}
+
+// SecretSlots 实现 provider.SecretSlotResolver：返回渠道当前启用的 Key 凭证名，按槽位升序。
+// 没有槽位行的老渠道退回单 Key（channel:<渠道 key>），与加多 Key 之前完全一致。
+func (s *AIConfigService) SecretSlots(ctx context.Context, channelKey string) ([]string, error) {
+	now := s.now()
+	s.slotMu.Lock()
+	if it, ok := s.slotCache[channelKey]; ok && now.Before(it.expires) {
+		s.slotMu.Unlock()
+		return it.names, nil
+	}
+	s.slotMu.Unlock()
+
+	if s.channels == nil {
+		return []string{model.ChannelSecretName(channelKey)}, nil
+	}
+	rows, err := s.channels.ListChannelKeys(ctx, channelKey)
+	if err != nil {
+		return nil, err
+	}
+	names := make([]string, 0, len(rows))
+	for _, r := range rows {
+		if r.Enabled {
+			names = append(names, model.ChannelKeySecretName(channelKey, r.Slot))
+		}
+	}
+	if len(rows) == 0 {
+		names = append(names, model.ChannelSecretName(channelKey))
+	} else if len(names) == 0 {
+		// 全停用：调度侧已禁止停用最后一把，这里兜底用最早的槽位，不让渠道彻底不可用
+		names = append(names, model.ChannelKeySecretName(channelKey, rows[0].Slot))
+	}
+
+	s.slotMu.Lock()
+	s.slotCache[channelKey] = aiSlotCacheItem{names: names, expires: now.Add(aiSlotCacheTTL)}
+	s.slotMu.Unlock()
+	return names, nil
+}
+
+// ForgetChannelSlots 清掉渠道槽位名的缓存：增删 Key、改启停后调用，让宿主立刻看到新列表。
+func (s *AIConfigService) ForgetChannelSlots(channelKey string) {
+	s.slotMu.Lock()
+	delete(s.slotCache, channelKey)
+	s.slotMu.Unlock()
+}

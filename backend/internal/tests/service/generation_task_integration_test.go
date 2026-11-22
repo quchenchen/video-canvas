@@ -240,7 +240,7 @@ func TestGenerationTaskService_Integration_Transitions(t *testing.T) {
 		if status == model.TaskPending {
 			return task
 		}
-		if _, err := env.svc.MarkSubmitted(ctx, task, "pt-"+fmt.Sprint(v.ID), nil, time.Now()); err != nil {
+		if _, err := env.svc.MarkSubmitted(ctx, task, "pt-"+fmt.Sprint(v.ID), nil, "", time.Now()); err != nil {
 			t.Fatal(err)
 		}
 		task, _ = env.store.GetByIDAny(ctx, v.ID)
@@ -403,7 +403,7 @@ func TestGenerationTaskService_Integration_Transitions(t *testing.T) {
 		v, err := env.svc.SubmitTest(ctx, env.user, fakeTaskSnapshot(model.KindVideo, 10), map[string]any{"prompt": "x"})
 		assertTaskCode(t, err, 0)
 		task, _ := env.store.GetByIDAny(ctx, v.ID)
-		_, _ = env.svc.MarkSubmitted(ctx, task, "pt", nil, time.Now())
+		_, _ = env.svc.MarkSubmitted(ctx, task, "pt", nil, "", time.Now())
 		task, _ = env.store.GetByIDAny(ctx, v.ID)
 		_, _ = env.svc.MarkFinalizing(ctx, task)
 		task, _ = env.store.GetByIDAny(ctx, v.ID)
@@ -450,7 +450,7 @@ func TestGenerationTaskService_Integration_ProviderColumns(t *testing.T) {
 			t.Fatal(err)
 		}
 		task, _ = env.store.GetByIDAny(ctx, v.ID)
-		if applied, err := env.svc.MarkSubmitted(ctx, task, "pt-1", json.RawMessage(`{"cursor":"c1"}`), time.Now()); err != nil || !applied {
+		if applied, err := env.svc.MarkSubmitted(ctx, task, "pt-1", json.RawMessage(`{"cursor":"c1"}`), "", time.Now()); err != nil || !applied {
 			t.Fatalf("applied=%v err=%v", applied, err)
 		}
 		got, _ := env.store.GetByIDAny(ctx, v.ID)
@@ -469,12 +469,48 @@ func TestGenerationTaskService_Integration_ProviderColumns(t *testing.T) {
 		}
 	})
 
+	t.Run("provider_state：多 Key 渠道用的槽位跟着任务走，后续轮询不清空", func(t *testing.T) {
+		env := newGTIEnv(t, cfg)
+		v, _ := env.create("")
+		task, _ := env.store.GetByIDAny(ctx, v.ID)
+		if applied, err := env.svc.MarkSubmitted(ctx, task, "pt-slot", json.RawMessage(`{"cursor":"c1"}`), "channel:ch1:key2", time.Now()); err != nil || !applied {
+			t.Fatalf("applied=%v err=%v", applied, err)
+		}
+		got, _ := env.store.GetByIDAny(ctx, v.ID)
+		st, ok := provider.DecodeProviderState(got.ProviderState)
+		if !ok || st.KeySlot != "channel:ch1:key2" {
+			t.Fatalf("提交时用的槽位没落库：%s", got.ProviderState)
+		}
+		// 轮询不带槽位：已有的不能被清掉，否则下一次查询会换一把 Key，上游按 Key 隔离就查不到任务
+		if applied, err := env.svc.MarkPolled(ctx, got, model.TaskRunning, nil, json.RawMessage(`{"cursor":"c2"}`), 1, time.Now()); err != nil || !applied {
+			t.Fatalf("applied=%v err=%v", applied, err)
+		}
+		polled, _ := env.store.GetByIDAny(ctx, v.ID)
+		st, ok = provider.DecodeProviderState(polled.ProviderState)
+		if !ok || st.KeySlot != "channel:ch1:key2" {
+			t.Fatalf("轮询把槽位弄丢了：%s", polled.ProviderState)
+		}
+		// 同步接口同样要落：图片这类提交即完成的任务没有后续查询，槽位用于对账
+		env2 := newGTIEnv(t, cfg)
+		v2, _ := env2.create("")
+		task2, _ := env2.store.GetByIDAny(ctx, v2.ID)
+		outs := json.RawMessage(`[{"type":"url","url":"https://up.example.com/a.png"}]`)
+		if applied, err := env2.svc.MarkImmediate(ctx, task2, "sync-slot", nil, "channel:ch1:key3", outs); err != nil || !applied {
+			t.Fatalf("applied=%v err=%v", applied, err)
+		}
+		imm, _ := env2.store.GetByIDAny(ctx, v2.ID)
+		st, ok = provider.DecodeProviderState(imm.ProviderState)
+		if !ok || st.KeySlot != "channel:ch1:key3" {
+			t.Fatalf("同步任务的槽位没落库：%s", imm.ProviderState)
+		}
+	})
+
 	t.Run("provider_result：同步结果落库并进入 finalizing，随后结算积分", func(t *testing.T) {
 		env := newGTIEnv(t, cfg)
 		v, _ := env.create("")
 		task, _ := env.store.GetByIDAny(ctx, v.ID)
 		outs := json.RawMessage(`[{"type":"url","url":"https://up.example.com/a.png"}]`)
-		if applied, err := env.svc.MarkImmediate(ctx, task, "sync-1", nil, outs); err != nil || !applied {
+		if applied, err := env.svc.MarkImmediate(ctx, task, "sync-1", nil, "", outs); err != nil || !applied {
 			t.Fatalf("applied=%v err=%v", applied, err)
 		}
 		got, _ := env.store.GetByIDAny(ctx, v.ID)

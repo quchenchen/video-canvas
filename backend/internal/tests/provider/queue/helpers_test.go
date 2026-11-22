@@ -57,7 +57,7 @@ func queueDB(t *testing.T) *gorm.DB {
 		}
 	})
 	if err := db.AutoMigrate(&model.GenerationTask{}, &model.GenerationTaskEvent{}, &model.UserCredit{}, &model.CreditLedger{},
-		&model.AIChannel{}, &model.User{}, &model.WorkerInstance{}, &model.StepTrial{}); err != nil {
+		&model.AIChannel{}, &model.AIChannelKey{}, &model.User{}, &model.WorkerInstance{}, &model.StepTrial{}); err != nil {
 		t.Fatalf("迁移业务表失败：%v", err)
 	}
 	if err := queue.Migrate(context.Background(), sqlDB, ""); err != nil {

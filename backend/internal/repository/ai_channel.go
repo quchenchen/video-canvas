@@ -278,14 +278,25 @@ func (r *AIChannelRepository) DeleteChannel(ctx context.Context, key string) (Ch
 		if refs.InUse() {
 			return ErrInUse
 		}
-		// 3. 删渠道行与它的 Key、Secret Key
+		// 3. 删渠道行与它的 Key、Secret Key；多 Key 的各槽位密钥与槽位元信息一起删
+		var slots []model.AIChannelKey
+		if err := tx.Where("channel_key = ?", key).Find(&slots).Error; err != nil {
+			return err
+		}
 		if err := tx.Where("key = ?", key).Delete(&model.AIChannel{}).Error; err != nil {
 			return err
 		}
-		return tx.Where("name IN ?", []string{
+		if err := tx.Where("channel_key = ?", key).Delete(&model.AIChannelKey{}).Error; err != nil {
+			return err
+		}
+		names := []string{
 			model.ChannelSecretName(key), model.ChannelSecretKeyName(key),
 			model.ChannelFilingAccessKeyName(key), model.ChannelFilingSecretKeyName(key),
-		}).Delete(&model.AISecret{}).Error
+		}
+		for _, s := range slots {
+			names = append(names, model.ChannelKeySecretName(key, s.Slot))
+		}
+		return tx.Where("name IN ?", names).Delete(&model.AISecret{}).Error
 	})
 	return refs, err
 }

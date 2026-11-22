@@ -30,6 +30,7 @@ func All() []any {
 		&AIPlugin{},
 		&AIPluginVersion{},
 		&AIChannel{},
+		&AIChannelKey{},
 		&AIModel{},
 		&AIConfigRevision{},
 		&AISecret{},

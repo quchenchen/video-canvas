@@ -220,10 +220,10 @@ func (w *Worker) providerState(t *model.GenerationTask) provider.ProviderState {
 	return st
 }
 
-// taskRef 组装 Executor 认识的任务信息：带上插件上次返回的 state 与准备阶段的结果。
+// taskRef 组装 Executor 认识的任务信息：带上插件上次返回的 state、准备阶段的结果与绑定的多 Key 槽位。
 func taskRef(t *model.GenerationTask, st provider.ProviderState) provider.TaskRef {
 	return provider.TaskRef{
 		ID: t.ID, UserID: t.UserID, ProviderTaskID: t.ProviderTaskID,
-		State: st.Plugin, Prepared: st.Prepared,
+		State: st.Plugin, Prepared: st.Prepared, KeySlot: st.KeySlot,
 	}
 }

@@ -38,6 +38,8 @@ type MemRepo struct {
 	DeleteInUse          bool                // 为 true 时 DeleteVersion / DeleteChannel / DeletePlugin / DeleteModel 一律返回 ErrInUse（模拟并发下被新引用）
 
 	ChannelTaskRefs map[string]int64 // 渠道 key → 快照引用它的非终态任务数
+	// ChannelKeys 是渠道的多 Key 槽位（假的 ai_channel_keys），按 channel_key 索引。
+	ChannelKeys map[string][]model.AIChannelKey
 }
 
 func NewMemRepo() *MemRepo {
@@ -51,6 +53,8 @@ func NewMemRepo() *MemRepo {
 		ActiveTaskRefs: map[uint64]int64{},
 
 		ChannelTaskRefs: map[string]int64{},
+
+		ChannelKeys: map[string][]model.AIChannelKey{},
 	}
 }
 

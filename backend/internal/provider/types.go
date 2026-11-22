@@ -109,6 +109,9 @@ type ProviderState struct {
 	Prepared json.RawMessage `json:"prepared,omitempty"`
 	// Plugin 是插件在 parseSubmitResponse / parseQueryResponse 里返回的私有 state（≤64KB），下次调用原样传回。
 	Plugin json.RawMessage `json:"plugin,omitempty"`
+	// KeySlot 是提交时使用的渠道 Key 凭证名（多 Key 渠道）。查询与取消要复用同一把 Key，
+	// 所以和插件 state 一起落库；单 Key 渠道为空，不影响老任务。
+	KeySlot string `json:"key_slot,omitempty"`
 }
 
 // DecodeProviderState 解码 provider_state 列；空值或损坏得到零值（损坏时 ok=false，调用方记警告后继续）。
@@ -129,6 +132,9 @@ type TaskRef struct {
 	ProviderTaskID string          // 提交前为空
 	State          json.RawMessage // 插件上次返回的私有状态（ProviderState.Plugin），没有为空
 	Prepared       json.RawMessage // 准备阶段已经完成的结果（ProviderState.Prepared），没有为空
+	// KeySlot 是提交时选中的那把渠道 Key 的凭证名：多 Key 渠道里查询 / 取消必须和提交用同一把，
+	// 否则上游按 Key 隔离时会查不到自己提交的任务。空表示还没绑定（首次提交时由宿主轮转选一把）。
+	KeySlot string
 }
 
 // SubmitInput 提交请求。Input 是已按模型能力（capabilities）校验过的规范化输入：prompt、op、各生成参数，以及 images / videos / audios 素材 id（uint64）数组。
@@ -147,6 +153,9 @@ type SubmitResult struct {
 	ProviderTaskID string
 	State          json.RawMessage // 插件返回的私有状态，≤64KB，由 worker 持久化
 	Immediate      *QueryResult    // 非空表示提交即出结果（succeeded / failed），worker 据此跳过轮询
+	// KeySlot 是这次提交实际用的渠道 Key 凭证名（多 Key 渠道）。worker 要把它存进 provider_state，
+	// 之后查询、取消都复用同一把。
+	KeySlot string
 }
 
 // 产物类型。
@@ -289,6 +298,12 @@ type Registry interface {
 // SecretResolver 解密并返回凭证明文。只有宿主的鉴权注入环节能调用，明文不进插件（auth: custom 且渠道开启除外）、也不进日志。
 type SecretResolver interface {
 	Get(ctx context.Context, name string) (string, error)
+}
+
+// SecretSlotResolver 是 SecretResolver 的可选扩展：返回渠道当前可用的 Key 凭证名（启用的槽位，按槽位升序）。
+// 宿主用它做多 Key 轮转与按 Key 放大并发；没有实现时按单 Key（channel:<渠道 key>）处理，行为不变。
+type SecretSlotResolver interface {
+	SecretSlots(ctx context.Context, channelKey string) ([]string, error)
 }
 
 // AssetFile 是打开的一份素材，调用方负责关闭 Body。

@@ -178,6 +178,8 @@ export interface ChannelView {
   enabled: boolean;
   /** API Key 是否已设置（只写不读） */
   secret_set: boolean;
+  /** 已配的 API Key 把数：多把按槽位轮转，并发额度按启用的把数放大；旧后端没有这个字段 */
+  key_count?: number;
   /** Secret Key（可选的第二凭证，AK/SK 签名类协议用）是否已设置（只写不读） */
   secret_key_set: boolean;
   /** 虚拟人像库（方舟真人素材备案）配置；旧后端没有这个字段 */
@@ -188,6 +190,20 @@ export interface ChannelView {
   updated_at: string;
   /** 创建时间 */
   created_at: string;
+}
+
+/** 渠道的一把 API Key：只回显末四位，明文永远读不回 */
+export interface ChannelKeyView {
+  /** 槽位号，1 起；稳定不变，删掉中间某把也不会重排 */
+  slot: number;
+  /** Key 的末四位，用于辨认 */
+  hint: string;
+  /** 备注，如「账号 A」 */
+  remark: string;
+  /** 停用后不再被轮转选中，进行中的任务仍用它收尾 */
+  enabled: boolean;
+  created_at: string;
+  updated_at: string;
 }
 
 /** 渠道的虚拟人像库配置：真人图片备案到哪个方舟素材组；全平台只能有一个渠道启用 */

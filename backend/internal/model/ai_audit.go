@@ -10,6 +10,9 @@ const (
 	AuditChannelCreate       = "channel.create"        // 新建渠道
 	AuditChannelUpdate       = "channel.update"        // 修改渠道（含切换插件版本）
 	AuditChannelSecret       = "channel.secret"        // 设置渠道 Key（不记值）
+	AuditChannelKeyAdd       = "channel.key_add"       // 给渠道新增一把 Key（detail 只含槽位号，不记值）
+	AuditChannelKeyUpdate    = "channel.key_update"    // 修改渠道某把 Key 的备注 / 启停（detail 只含槽位号与启用状态）
+	AuditChannelKeyDelete    = "channel.key_delete"    // 删除渠道某把 Key（detail 只含槽位号）
 	AuditChannelTrusted      = "channel.trusted"       // 历史记录：已取消的“允许访问内网”开关（trusted_internal），不再产生新记录，展示旧审计时要认得
 	AuditChannelCred         = "channel.credential"    // 历史记录：已取消的 allow_credentials 开关，不再产生新记录，展示旧审计时要认得
 	AuditChannelSecKey       = "channel.secret_key"    // 设置 / 清除渠道 Secret Key（不记值）

@@ -73,7 +73,8 @@ func (w *Worker) submit(ctx context.Context, t *model.GenerationTask, snap *prov
 // 之后提交阶段重试不会重复上传。失败返回错误，宿主按 retryable 处理（没落库，下次会重新准备）。
 func (w *Worker) savePrepared(t *model.GenerationTask, st provider.ProviderState) func(context.Context, json.RawMessage) error {
 	return func(ctx context.Context, prepared json.RawMessage) error {
-		merged := provider.ProviderState{Prepared: prepared, Plugin: st.Plugin}
+		// KeySlot 要一起带上：准备阶段落库会覆盖 provider_state，丢了它多 Key 任务查询时就换了把 Key
+		merged := provider.ProviderState{Prepared: prepared, Plugin: st.Plugin, KeySlot: st.KeySlot}
 		if err := w.store.SaveProviderState(ctx, t, merged); err != nil {
 			return fmt.Errorf("保存准备阶段结果失败：%w", err)
 		}
@@ -90,8 +91,9 @@ func submittedState(res *provider.SubmitResult) json.RawMessage {
 }
 
 // submittedRef 是刚提交成功、还没落库的上游任务的引用，用于“提交期间任务被取消”时尽力取消上游。
-func submittedRef(t *model.GenerationTask, providerTaskID string, state json.RawMessage) provider.TaskRef {
-	return provider.TaskRef{ID: t.ID, UserID: t.UserID, ProviderTaskID: providerTaskID, State: state}
+// keySlot 必须带上：多 Key 渠道取消时也得用提交的那把 Key，否则上游认不出这个任务。
+func submittedRef(t *model.GenerationTask, providerTaskID string, state json.RawMessage, keySlot string) provider.TaskRef {
+	return provider.TaskRef{ID: t.ID, UserID: t.UserID, ProviderTaskID: providerTaskID, State: state, KeySlot: keySlot}
 }
 
 // onSubmitted 上游已异步受理：记录上游任务 id 与插件 state，安排第一次查询。
@@ -110,7 +112,7 @@ func (w *Worker) onSubmitted(ctx context.Context, t *model.GenerationTask, snap 
 	state := submittedState(res)
 	var applied bool
 	err := w.retryDB(ctx, func() (e error) {
-		applied, e = w.store.MarkSubmitted(ctx, t, pid, state, next)
+		applied, e = w.store.MarkSubmitted(ctx, t, pid, state, res.KeySlot, next)
 		return e
 	})
 	if err != nil {
@@ -121,7 +123,7 @@ func (w *Worker) onSubmitted(ctx context.Context, t *model.GenerationTask, snap 
 	if !applied {
 		// 提交期间任务被取消 / 超时了：上游已经产生了任务，尽力取消它，避免白白消耗上游额度
 		log.Warn("提交期间任务已被取消或超时，尽力取消上游任务", zap.String("provider_task_id", pid))
-		w.cancelProvider(ctx, t, snap, submittedRef(t, pid, state))
+		w.cancelProvider(ctx, t, snap, submittedRef(t, pid, state, res.KeySlot))
 		return
 	}
 	log.Info("任务已提交给上游", zap.String("provider_task_id", pid))
@@ -148,7 +150,7 @@ func (w *Worker) onImmediate(ctx context.Context, t *model.GenerationTask, snap 
 	pid, state := res.ProviderTaskID, submittedState(res)
 	var applied bool
 	err = w.retryDB(ctx, func() (e error) {
-		applied, e = w.store.MarkImmediate(ctx, t, pid, state, raw)
+		applied, e = w.store.MarkImmediate(ctx, t, pid, state, res.KeySlot, raw)
 		return e
 	})
 	if err != nil {
@@ -159,7 +161,7 @@ func (w *Worker) onImmediate(ctx context.Context, t *model.GenerationTask, snap 
 	if !applied {
 		log.Warn("提交期间任务已被取消或超时，丢弃即时结果", zap.String("provider_task_id", pid))
 		if pid != "" {
-			w.cancelProvider(ctx, t, snap, submittedRef(t, pid, state))
+			w.cancelProvider(ctx, t, snap, submittedRef(t, pid, state, res.KeySlot))
 		}
 		return
 	}

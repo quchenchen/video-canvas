@@ -1764,7 +1764,7 @@ func TestGenerationTaskService_Transitions(t *testing.T) {
 
 	t.Run("MarkSubmitted：pending → queued，记录平台任务 id、提交时间，推送", func(t *testing.T) {
 		env, task := newEnv(model.TaskPending, nil)
-		applied, err := env.svc.MarkSubmitted(ctx, task, "pt-1", nil, next)
+		applied, err := env.svc.MarkSubmitted(ctx, task, "pt-1", nil, "", next)
 		if err != nil || !applied {
 			t.Fatalf("applied=%v err=%v", applied, err)
 		}
@@ -1816,7 +1816,7 @@ func TestGenerationTaskService_Transitions(t *testing.T) {
 			tk.DeadlineAt = env0Now.Add(30 * time.Minute) // 创建时算的：创建时间 + 超时
 		})
 		env.now = env0Now.Add(20 * time.Minute) // 排了 20 分钟才轮到
-		if applied, err := env.svc.MarkSubmitted(ctx, task, "pt-1", nil, next); err != nil || !applied {
+		if applied, err := env.svc.MarkSubmitted(ctx, task, "pt-1", nil, "", next); err != nil || !applied {
 			t.Fatalf("applied=%v err=%v", applied, err)
 		}
 		if got := env.repo.tasks[task.ID]; !got.DeadlineAt.Equal(env.now.Add(30 * time.Minute)) {
@@ -1848,7 +1848,7 @@ func TestGenerationTaskService_Transitions(t *testing.T) {
 
 	t.Run("MarkSubmitted：任务已被取消则不迁移", func(t *testing.T) {
 		env, task := newEnv(model.TaskCanceled, nil)
-		applied, err := env.svc.MarkSubmitted(ctx, task, "pt-1", nil, next)
+		applied, err := env.svc.MarkSubmitted(ctx, task, "pt-1", nil, "", next)
 		if err != nil || applied {
 			t.Fatalf("applied=%v err=%v，期望 false/nil", applied, err)
 		}
@@ -2127,7 +2127,7 @@ func TestGenerationTaskService_Transitions(t *testing.T) {
 		env, task := newEnv(model.TaskPending, func(t *model.GenerationTask) {
 			t.ProviderState = []byte(`{"prepared":{"file":"f-1"}}`)
 		})
-		applied, err := env.svc.MarkSubmitted(ctx, task, "pt-1", json.RawMessage(`{"cursor":"c1"}`), next)
+		applied, err := env.svc.MarkSubmitted(ctx, task, "pt-1", json.RawMessage(`{"cursor":"c1"}`), "", next)
 		if err != nil || !applied {
 			t.Fatalf("applied=%v err=%v", applied, err)
 		}
@@ -2139,7 +2139,7 @@ func TestGenerationTaskService_Transitions(t *testing.T) {
 
 	t.Run("MarkSubmitted：pluginState 为空时不改 provider_state", func(t *testing.T) {
 		env, task := newEnv(model.TaskPending, func(t *model.GenerationTask) { t.ProviderState = []byte(`{"plugin":{"a":1}}`) })
-		if _, err := env.svc.MarkSubmitted(ctx, task, "pt-1", nil, next); err != nil {
+		if _, err := env.svc.MarkSubmitted(ctx, task, "pt-1", nil, "", next); err != nil {
 			t.Fatal(err)
 		}
 		if string(env.repo.tasks[task.ID].ProviderState) != `{"plugin":{"a":1}}` {
@@ -2150,7 +2150,7 @@ func TestGenerationTaskService_Transitions(t *testing.T) {
 	t.Run("MarkSubmitted：仓储出错透传", func(t *testing.T) {
 		env, task := newEnv(model.TaskPending, nil)
 		env.repo.errs["UpdateIf"] = errors.New("db down")
-		applied, err := env.svc.MarkSubmitted(ctx, task, "pt-1", nil, next)
+		applied, err := env.svc.MarkSubmitted(ctx, task, "pt-1", nil, "", next)
 		if err == nil || applied {
 			t.Fatalf("applied=%v err=%v", applied, err)
 		}
@@ -2159,7 +2159,7 @@ func TestGenerationTaskService_Transitions(t *testing.T) {
 	t.Run("MarkImmediate：同步接口 pending → finalizing，结果写进 provider_result，立即转存并唤醒 worker", func(t *testing.T) {
 		env, task := newEnv(model.TaskPending, nil)
 		outs := json.RawMessage(`[{"type":"url","url":"https://up.example.com/a.png"}]`)
-		applied, err := env.svc.MarkImmediate(ctx, task, "sync-1", json.RawMessage(`{"s":1}`), outs)
+		applied, err := env.svc.MarkImmediate(ctx, task, "sync-1", json.RawMessage(`{"s":1}`), "", outs)
 		if err != nil || !applied {
 			t.Fatalf("applied=%v err=%v", applied, err)
 		}
@@ -2180,7 +2180,7 @@ func TestGenerationTaskService_Transitions(t *testing.T) {
 
 	t.Run("MarkImmediate：任务已被取消则不迁移、不唤醒", func(t *testing.T) {
 		env, task := newEnv(model.TaskCanceled, nil)
-		applied, err := env.svc.MarkImmediate(ctx, task, "sync-1", nil, json.RawMessage(`[]`))
+		applied, err := env.svc.MarkImmediate(ctx, task, "sync-1", nil, "", json.RawMessage(`[]`))
 		if err != nil || applied {
 			t.Fatalf("applied=%v err=%v，期望 false/nil", applied, err)
 		}
@@ -2191,7 +2191,7 @@ func TestGenerationTaskService_Transitions(t *testing.T) {
 
 	t.Run("MarkImmediate 只允许从 pending 迁移", func(t *testing.T) {
 		env, task := newEnv(model.TaskRunning, nil)
-		applied, err := env.svc.MarkImmediate(ctx, task, "sync-1", nil, json.RawMessage(`[]`))
+		applied, err := env.svc.MarkImmediate(ctx, task, "sync-1", nil, "", json.RawMessage(`[]`))
 		if err != nil || applied {
 			t.Fatalf("running 不能 MarkImmediate：%v %v", applied, err)
 		}

@@ -35,6 +35,20 @@ type AIChannelRepo interface {
 	// DeleteChannel 事务内锁住渠道行、重新统计引用后删除渠道与它的 Key：仍被引用时返回当时的引用与 repository.ErrInUse，
 	// 不存在返回 repository.ErrNotFound。
 	DeleteChannel(ctx context.Context, key string) (repository.ChannelRefs, error)
+	// ListChannelKeys 返回渠道的全部 Key 槽位，按 slot 升序；渠道不存在返回空切片。
+	ListChannelKeys(ctx context.Context, channelKey string) ([]model.AIChannelKey, error)
+	// CountEnabledChannelKeys 返回渠道启用的槽位数：并发额度与轮转按它放大。
+	CountEnabledChannelKeys(ctx context.Context, channelKey string) (int, error)
+	// AddChannelKey 事务内锁渠道行、分配下一个槽位后插入；渠道不存在返回 repository.ErrNotFound。
+	AddChannelKey(ctx context.Context, k *model.AIChannelKey) error
+	// UpdateChannelKey 更新槽位的备注 / 启停（nil 表示不改）；槽位不存在返回 repository.ErrNotFound。
+	UpdateChannelKey(ctx context.Context, channelKey string, slot int, remark *string, enabled *bool) error
+	// DeleteChannelKey 删除槽位元信息；槽位不存在返回 repository.ErrNotFound。
+	DeleteChannelKey(ctx context.Context, channelKey string, slot int) error
+	// FillChannelKeyHint 补写末四位提示（升级回填的行 hint 为空，读到明文后补）。
+	FillChannelKeyHint(ctx context.Context, channelKey string, slot int, hint string) error
+	// SetChannelKeyHint 覆盖末四位提示（主 Key 被替换后旧的四位已经不对了）。
+	SetChannelKeyHint(ctx context.Context, channelKey string, slot int, hint string) error
 }
 
 // AIChannelSecrets 是渠道 Key 的存取依赖，由 AIConfigService 实现（凭证加解密都在那里）。
@@ -49,6 +63,8 @@ type AIChannelSecrets interface {
 	Get(ctx context.Context, name string) (string, error)
 	// ForgetSecret 清掉本实例对该凭证的明文缓存（凭证行已被删除后调用）。
 	ForgetSecret(name string)
+	// ForgetChannelSlots 清掉渠道 Key 槽位名缓存：槽位增删、启停变化后调用，让宿主立刻看到新列表。
+	ForgetChannelSlots(channelKey string)
 }
 
 // AIChannelModels 是渠道服务对模型配置的依赖，由 AIConfigService 实现：拉取时标记已存在的模型，导入时创建“待配置”模型。
@@ -109,6 +125,7 @@ type ChannelView struct {
 	Sort         int                `json:"sort"`
 	Enabled      bool               `json:"enabled"`
 	SecretSet    bool               `json:"secret_set"`
+	KeyCount     int                `json:"key_count"` // 已配的 API Key 把数：多把按槽位轮转，并发额度按它放大
 	SecretKeySet bool               `json:"secret_key_set"`
 	Filing       ChannelFilingView  `json:"filing"`
 	UpdatedBy    uint64             `json:"updated_by"`
@@ -252,9 +269,22 @@ func (s *AIChannelService) load(ctx context.Context, key string) (*model.AIChann
 
 // view 由渠道行组装视图。headers / rate_limit 正文损坏时按空值输出，不让一行坏数据拖垮列表。
 func (s *AIChannelService) view(ctx context.Context, ch *model.AIChannel) (*ChannelView, error) {
-	set, err := s.secrets.SecretIsSet(ctx, model.ChannelSecretName(ch.Key))
+	// Key 可能有多个槽位；槽位行是“有 Key”的准绳。迁移回填之前建的渠道只有 channel:<key>
+	// 而没有槽位行，退回按历史名字判断，避免升级瞬间显示成“未设置”。
+	keyRows, err := s.repo.ListChannelKeys(ctx, ch.Key)
 	if err != nil {
 		return nil, err
+	}
+	set := len(keyRows) > 0
+	keyCount := len(keyRows)
+	if !set {
+		set, err = s.secrets.SecretIsSet(ctx, model.ChannelSecretName(ch.Key))
+		if err != nil {
+			return nil, err
+		}
+		if set {
+			keyCount = 1
+		}
 	}
 	keySet, err := s.secrets.SecretIsSet(ctx, model.ChannelSecretKeyName(ch.Key))
 	if err != nil {
@@ -262,7 +292,7 @@ func (s *AIChannelService) view(ctx context.Context, ch *model.AIChannel) (*Chan
 	}
 	v := &ChannelView{
 		Key: ch.Key, Name: ch.Name, BaseURL: ch.BaseURL, Headers: decodeStringMap(ch.HeadersJSON), Sort: ch.Sort,
-		Enabled: ch.Enabled, SecretSet: set, SecretKeySet: keySet,
+		Enabled: ch.Enabled, SecretSet: set, KeyCount: keyCount, SecretKeySet: keySet,
 		UpdatedBy: ch.UpdatedBy, UpdatedAt: ch.UpdatedAt, CreatedAt: ch.CreatedAt,
 	}
 	if len(ch.RateLimitJSON) > 0 {

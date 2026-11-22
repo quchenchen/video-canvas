@@ -19,7 +19,8 @@
  *   5. 图生图不需要 tags:["img2img"]。
  *
  * 用户输入（宿主按模型 capabilities 校验后传入）：
- *   prompt（必填）、op（t2i / i2i）、images（参考图，宿主按渠道设置转换）、size、aspect_ratio / ratio、
+ *   prompt（必填）、op（t2i / i2i）、images（参考图，宿主按渠道设置转换）、
+ *   resolution（清晰度档位，宿主按 capabilities 传这个名）/ size（老写法）、aspect_ratio / ratio、
  *   n / count、seed；return_base64（可选）。
  *
  * 写法说明：goja 只保证 ES5.1 + 部分 ES6，所以用 var / function，不用可选链与空值合并。
@@ -30,7 +31,7 @@ module.exports = {
     apiVersion: 1,
     key: "agnes-image",
     name: "Agnes AI · 图片",
-    version: "1.0.1",
+    version: "1.0.2",
     vendor: "agnes",
     description: "Agnes AI 图片生成：文生图、图生图、多图合成（同步，支持 URL 与 base64）",
     auth: { type: "bearer" },
@@ -57,7 +58,9 @@ module.exports = {
       body.prompt = String(input.prompt);
     }
 
-    var size = firstString(input.size);
+    // 宿主按模型 capabilities 传的是 resolution 档位（1K/2K/3K/4K），size 是老写法；
+    // 两个都认，否则清晰度选什么都只会走下面的 1K 兜底。
+    var size = firstString(input.size, input.resolution);
     if (size) {
       body.size = size;
     } else {

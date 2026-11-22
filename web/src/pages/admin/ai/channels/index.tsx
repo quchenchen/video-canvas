@@ -34,6 +34,7 @@ import { useAdminCatalogOptions } from "../../use-admin";
 import { ChannelHeader } from "./channel-header";
 import { SUPER_ONLY, ChannelList } from "./channel-list";
 import { openChannelDialog } from "./channel-dialog";
+import { ChannelKeysSection } from "./keys-section";
 import { openPullModelsDialog } from "./pull-models-dialog";
 import { openSecretDialog } from "./secret-dialog";
 import { useModelCounts } from "./use-model-counts";
@@ -304,6 +305,12 @@ export default function ChannelsPage() {
                 onSetKey={() => setKey(channel)}
                 onToggle={() => toggleChannel(channel)}
                 onDelete={() => deleteChannel(channel)}
+              />
+              <ChannelKeysSection
+                key={channel.key}
+                channelKey={channel.key}
+                canWrite={canWrite}
+                onChanged={refreshAll}
               />
               <ChannelModelsPanel
                 key={channel.key}

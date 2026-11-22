@@ -46,6 +46,7 @@ type GenAsset struct {
 type GenCharacter struct {
 	NodeID, Name, AvatarAssetID, VoiceAssetID string
 	VoiceTaskID                               string // 非空时提交前核对任务状态，不沿用生成中的旧声音
+	AvatarPending                             bool   // 主图正在生成：没有图可带，但也不是「本来就没有主图」的旁白
 }
 
 // Generation 读出节点发起生成所需的输入。节点不存在、是组、或者是不能生成的种类时返回 ErrInvalid。
@@ -191,7 +192,8 @@ func (s *GenSource) manualRefIDs(kind string) []uint64 {
 }
 
 // addCharacter 把角色卡展开成参考：主图、补充图（按保存顺序）进图片，绑定的声音进音频，规则与前端 characterRefsOfNode 一致。
-// 主图未就绪时保留声音关系供校验，不带旧图；没有声音的空卡仍只退回人物名字。
+// 只有声音、没有主图的角色（旁白、画外音）照样把声音带进来，只是不占参考图；主图正在重绘时不沿用旧图和旧音色。
+// 没有声音的空卡仍只退回人物名字。
 func (s *GenSource) addCharacter(up Node) {
 	d := up.Data()
 	meta, _ := d["character"].(map[string]any)
@@ -205,28 +207,29 @@ func (s *GenSource) addCharacter(up Node) {
 	if voice, ok := meta["voice"].(map[string]any); ok && str(voice["mode"]) == "audio" {
 		role.VoiceAssetID = str(voice["assetId"])
 	}
-	avatar := str(d["assetId"])
-	if avatar == "" || str(d["status"]) == "running" {
-		s.Characters = append(s.Characters, role)
-		return
-	}
-	role.AvatarAssetID = avatar
-	s.Characters = append(s.Characters, role)
 	add := func(kind, id, part string) {
 		if id != "" {
 			s.Assets = append(s.Assets, GenAsset{NodeID: up.ID(), Kind: kind, AssetID: id, FromCharacter: true, CharacterPart: part})
 		}
 	}
-	add(KindImage, avatar, "avatar")
-	extras, _ := meta["extras"].([]any)
-	for _, e := range extras {
-		if extra, ok := e.(map[string]any); ok {
-			add(KindImage, str(extra["assetId"]), "extra")
+	avatar := str(d["assetId"])
+	if str(d["status"]) == "running" {
+		role.AvatarPending = true
+		s.Characters = append(s.Characters, role)
+		return
+	}
+	role.AvatarAssetID = avatar
+	s.Characters = append(s.Characters, role)
+	if avatar != "" {
+		add(KindImage, avatar, "avatar")
+		extras, _ := meta["extras"].([]any)
+		for _, e := range extras {
+			if extra, ok := e.(map[string]any); ok {
+				add(KindImage, str(extra["assetId"]), "extra")
+			}
 		}
 	}
-	if voice, ok := meta["voice"].(map[string]any); ok && str(voice["mode"]) == "audio" {
-		add(KindAudio, str(voice["assetId"]), "voice")
-	}
+	add(KindAudio, role.VoiceAssetID, "voice")
 }
 
 // BindTasks 把已创建的生成任务绑定到节点：写 taskId 并把状态置为 running，
@@ -363,6 +366,7 @@ func referenceIndex(refs map[string][]uint64, kind, assetID string) int {
 }
 
 // characterPrompt 按角色节点编译人物及声音说明，只用于视频，不注入人物设定或试音台词。
+// 没有主图的角色（旁白、画外音）只写音色对应，不进【人物参考】，也不当作画面里的人物。
 func (s *GenSource) characterPrompt(refs map[string][]uint64) (map[string]string, []string) {
 	names := map[string]string{}
 	if s.Kind != KindVideo {
@@ -371,29 +375,36 @@ func (s *GenSource) characterPrompt(refs map[string][]uint64) (map[string]string
 	var visuals, voices, blocks []string
 	for _, c := range s.Characters {
 		image := referenceIndex(refs, KindImage, c.AvatarAssetID)
-		if image < 0 {
+		subject := ""
+		if image >= 0 {
+			subject = fmt.Sprintf("%s（图片%d中的人物）", c.Name, image+1)
+			names[c.NodeID] = subject
+			var extras []string
+			for _, a := range s.Assets {
+				if a.NodeID != c.NodeID || a.CharacterPart != "extra" {
+					continue
+				}
+				index := referenceIndex(refs, KindImage, a.AssetID)
+				label := fmt.Sprintf("图片%d", index+1)
+				if index >= 0 && index != image && !slices.Contains(extras, label) {
+					extras = append(extras, label)
+				}
+			}
+			line := fmt.Sprintf("%s：图片%d中的人物", c.Name, image+1)
+			if len(extras) > 0 {
+				line += "，补充视角：" + strings.Join(extras, "、")
+			}
+			visuals = append(visuals, line+"。")
+		}
+		audio := referenceIndex(refs, KindAudio, c.VoiceAssetID)
+		if audio < 0 {
 			continue
 		}
-		subject := fmt.Sprintf("%s（图片%d中的人物）", c.Name, image+1)
-		names[c.NodeID] = subject
-		var extras []string
-		for _, a := range s.Assets {
-			if a.NodeID != c.NodeID || a.CharacterPart != "extra" {
-				continue
-			}
-			index := referenceIndex(refs, KindImage, a.AssetID)
-			label := fmt.Sprintf("图片%d", index+1)
-			if index >= 0 && index != image && !slices.Contains(extras, label) {
-				extras = append(extras, label)
-			}
-		}
-		line := fmt.Sprintf("%s：图片%d中的人物", c.Name, image+1)
-		if len(extras) > 0 {
-			line += "，补充视角：" + strings.Join(extras, "、")
-		}
-		visuals = append(visuals, line+"。")
-		if audio := referenceIndex(refs, KindAudio, c.VoiceAssetID); audio >= 0 {
+		if subject != "" {
 			voices = append(voices, fmt.Sprintf("%s说话时，音色参考音频%d。", subject, audio+1))
+		} else if c.AvatarAssetID == "" && !c.AvatarPending {
+			// 真的没有主图（旁白、画外音）：只有声音，提示模型这是画外音，别去找画面里的人
+			voices = append(voices, fmt.Sprintf("%s（画外音）：音色参考音频%d。", c.Name, audio+1))
 		}
 	}
 	if len(visuals) > 0 {
@@ -405,7 +416,8 @@ func (s *GenSource) characterPrompt(refs map[string][]uint64) (map[string]string
 	return names, blocks
 }
 
-// ValidateCharacterInput 检查视频中已绑定声音的角色是否有完整的主图与音频，防止降级后继续提交。
+// ValidateCharacterInput 检查视频中已绑定声音的角色是否有完整的音频与实际提交的主图，防止降级后继续提交。
+// 只有声音、没有主图的角色（旁白、画外音）不要求参考图，但仍要求音色已带入且开启了声音生成。
 func (s *GenSource) ValidateCharacterInput(refs map[string][]uint64, generateAudio bool) error {
 	if s.Kind != KindVideo {
 		return nil
@@ -414,7 +426,7 @@ func (s *GenSource) ValidateCharacterInput(refs map[string][]uint64, generateAud
 		if c.VoiceAssetID == "" {
 			continue
 		}
-		if referenceIndex(refs, KindImage, c.AvatarAssetID) < 0 {
+		if c.AvatarPending || (c.AvatarAssetID != "" && referenceIndex(refs, KindImage, c.AvatarAssetID) < 0) {
 			return fmt.Errorf("角色「%s」的主图未就绪或当前方式不支持参考图片", c.Name)
 		}
 		if referenceIndex(refs, KindAudio, c.VoiceAssetID) < 0 {

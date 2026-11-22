@@ -49,9 +49,13 @@ const (
 
 // channelLimitSQL 读渠道当前的“最大同时生成数”，缺省、为 0 或渠道记录不存在都表示不限。
 // 取当前配置而不是快照：运营调整上限后，对还在排队的任务立即生效。
+//
+// 多 Key 渠道按启用的槽位数放大：max_running 是「每把 Key」的同时生成数，上游按 Key 限并发时，
+// N 把 Key 才能真的跑到 N 倍。没有槽位的渠道（单 Key 或老数据）乘数为 1，行为不变。
 const channelLimitSQL = `
-SELECT COALESCE(NULLIF(rate_limit_json->>'max_running', '')::int, 0)
-FROM ai_channels WHERE key = ?`
+SELECT COALESCE(NULLIF(c.rate_limit_json->>'max_running', '')::int, 0)
+       * GREATEST(1, (SELECT COUNT(*) FROM ai_channel_keys k WHERE k.channel_key = c.key AND k.enabled))
+FROM ai_channels c WHERE c.key = ?`
 
 // channelAheadSQL 数渠道上排在我前面、并且“现在真能拿到名额”的等待者：
 // 同渠道、仍在 pending 且没拿到名额、没超时、(created_at, id) 更小，并且它自己的用户还有空闲名额。

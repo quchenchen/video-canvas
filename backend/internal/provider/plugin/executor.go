@@ -105,6 +105,8 @@ type Executor struct {
 	opts     Options
 	loader   *loader
 	limiters *limiterSet
+	// pools 是各渠道多 Key 的轮转与冷却状态（进程内），见 keypool.go
+	pools *keyPools
 
 	// 出站 Transport 懒创建并缓存，所有渠道共用同一个连接池。
 	// SSRF 防护不受影响：协议与用户名密码在每次请求的 hostGuardRT 里检查（http.Client 每次新建，很轻），
@@ -121,7 +123,7 @@ var (
 // New 创建可并发复用的插件宿主。
 func New(opts Options) *Executor {
 	opts.applyDefaults()
-	e := &Executor{opts: opts, limiters: newLimiterSet()}
+	e := &Executor{opts: opts, limiters: newLimiterSet(), pools: newKeyPools()}
 	e.loader = newLoader(opts.Runner, opts.Codes)
 	return e
 }
@@ -209,6 +211,8 @@ func (e *Executor) Submit(ctx context.Context, snap *provider.Snapshot, in provi
 	if err := o.saveInlineImages(ctx, result.Immediate); err != nil {
 		return nil, err
 	}
+	// 多 Key 渠道：把这次用的那把 Key 交给 worker 落库，之后查询 / 取消复用同一把
+	result.KeySlot = o.keyName
 	return result, nil
 }
 
@@ -562,7 +566,7 @@ type assetResponse struct {
 func (o *operation) execute(ctx context.Context, b *builtRequest, phase string) (hookResponse, error) {
 	requestCtx, cancel := context.WithTimeout(ctx, b.timeout)
 	defer cancel()
-	release, err := o.e.limit(requestCtx, o.rt.Channel)
+	release, err := o.limitForRequest(requestCtx)
 	if err != nil {
 		return hookResponse{}, retryableErr("", "渠道限流等待被取消", err)
 	}
@@ -601,7 +605,10 @@ func (o *operation) execute(ctx context.Context, b *builtRequest, phase string) 
 			raw = scrubImageError(raw)
 		}
 		h := responseFromBytes(resp, raw, responseJSON)
-		return hookResponse{}, o.classifyHTTPError(ctx, h)
+		classified := o.classifyHTTPError(ctx, h)
+		// 多 Key 渠道：这把 Key 被限流 / 失效 / 没额度时先冷却，后续请求换下一把
+		o.coolKeyForStatus(resp.StatusCode, errorClassOf(classified))
+		return hookResponse{}, classified
 	}
 	if b.responseType == responseImageJSON {
 		return o.imageJSONResponse(resp)
@@ -876,6 +883,17 @@ func (e *Executor) limit(ctx context.Context, ch provider.ChannelSnapshot) (func
 	return e.limiters.get(ch.Key, ch.RateLimit.RPS, ch.RateLimit.MaxConcurrency).acquire(ctx)
 }
 
+// limitForRequest 是任务请求的限流：多 Key 渠道按 Key 数放大 —— rps 与 max_concurrency 是「每把 Key」的配额，
+// 上游按 Key 限并发时，N 把 Key 才能真的跑到 N 倍。单 Key 渠道 keys=1，与 limit 完全一致。
+func (o *operation) limitForRequest(ctx context.Context) (func(), error) {
+	ch := o.rt.Channel
+	keys := 1
+	if names, err := o.resolveKeyNames(ctx); err == nil && len(names) > 1 {
+		keys = len(names)
+	}
+	return o.e.limiters.get(ch.Key, ch.RateLimit.RPS*float64(keys), ch.RateLimit.MaxConcurrency*keys).acquire(ctx)
+}
+
 // client 返回受防护的客户端：不限域名，只允许 http(s)、不带用户名密码；底层 Transport 复用，内网在拨号时拦截。
 func (e *Executor) client() *http.Client {
 	return netguard.NewClient(e.transport(), nil, e.opts.MaxRedirects)
@@ -931,6 +949,15 @@ func stateOrNil(raw json.RawMessage) json.RawMessage {
 		return nil
 	}
 	return raw
+}
+
+// errorClassOf 取错误里的分类；不是 *provider.Error 时返回空串。
+func errorClassOf(err error) provider.ErrorClass {
+	var pe *provider.Error
+	if errors.As(err, &pe) {
+		return pe.Class
+	}
+	return ""
 }
 
 func validErrorClass(c provider.ErrorClass) bool {

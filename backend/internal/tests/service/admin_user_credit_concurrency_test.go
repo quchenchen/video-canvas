@@ -194,7 +194,7 @@ func TestAdminUser_CreditAdjust_Integration(t *testing.T) {
 					return
 				}
 				// pending -> queued（上游受理）-> finalizing（出结果）-> 成功结算
-				if ok, err := e.svc.MarkSubmitted(ctx, task, fmt.Sprintf("pt-%d", id), nil, time.Now()); err != nil || !ok {
+				if ok, err := e.svc.MarkSubmitted(ctx, task, fmt.Sprintf("pt-%d", id), nil, "", time.Now()); err != nil || !ok {
 					t.Errorf("MarkSubmitted：%v %v", ok, err)
 					return
 				}

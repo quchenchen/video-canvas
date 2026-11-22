@@ -63,6 +63,9 @@ export const adminAiEndpoints = {
   channel,
   channelSecret: (key: string) => `${channel(key)}/secret`,
   channelSecretKey: (key: string) => `${channel(key)}/secret-key`,
+  // 多 Key：一个渠道可以配多把，请求按槽位轮转，并发额度按启用的把数放大
+  channelKeys: (key: string) => `${channel(key)}/keys`,
+  channelKey: (key: string, slot: number) => `${channel(key)}/keys/${slot}`,
   channelFilingSecret: (key: string) => `${channel(key)}/filing-secret`,
   channelSort: () => `${P}/channels/sort`,
   channelPullModels: (key: string) => `${channel(key)}/pull-models`,

@@ -50,6 +50,8 @@ type AIChannelReader interface {
 	GetChannel(ctx context.Context, key string) (*model.AIChannel, error)
 	// ListChannels 返回所有渠道，Registry 加载时用。
 	ListChannels(ctx context.Context) ([]model.AIChannel, error)
+	// ListChannelKeys 返回渠道的 Key 槽位（多 Key 轮转用），按 slot 升序。
+	ListChannelKeys(ctx context.Context, channelKey string) ([]model.AIChannelKey, error)
 }
 
 // AIPluginReader 是本服务对插件表的只读依赖（签名与 repository.AIPluginRepository 一致）。
@@ -125,6 +127,11 @@ type AIConfigService struct {
 	secMu    sync.Mutex
 	secCache map[string]aiSecretCacheItem
 
+	// 渠道 Key 槽位名的短缓存：宿主每次请求都要知道这个渠道有哪些 Key（多 Key 轮转），
+	// 槽位变化很少（运营手动增删），缓存几秒就够，避免轮询把 DB 打热；增删 Key 时精确失效。
+	slotMu    sync.Mutex
+	slotCache map[string]aiSlotCacheItem
+
 	// Registry 内存状态。regMu 保护 regState 的读写；regLoadMu 串行化刷新，避免并发刷新打爆数据库。
 	regMu     sync.RWMutex
 	regState  *aiRegistryState
@@ -133,21 +140,23 @@ type AIConfigService struct {
 }
 
 var (
-	_ provider.Registry       = (*AIConfigService)(nil)
-	_ provider.SecretResolver = (*AIConfigService)(nil)
+	_ provider.Registry           = (*AIConfigService)(nil)
+	_ provider.SecretResolver     = (*AIConfigService)(nil)
+	_ provider.SecretSlotResolver = (*AIConfigService)(nil)
 )
 
 // NewAIConfigService 创建配置服务。channels / plugins 是渠道与插件的只读仓储（发布前置检查与 Registry 加载用）；
 // secretKey 是凭证主密钥（cfg.AI.SecretKey），为空时服务照常启动，但设置 / 读取凭证会返回明确错误。
 func NewAIConfigService(repo AIConfigRepo, channels AIChannelReader, plugins AIPluginReader, secretKey string) *AIConfigService {
 	return &AIConfigService{
-		repo:     repo,
-		channels: channels,
-		plugins:  plugins,
-		now:      time.Now,
-		cipher:   newAISecretCipher(secretKey),
-		secCache: map[string]aiSecretCacheItem{},
-		regTTL:   aiRegistryTTL,
+		repo:      repo,
+		channels:  channels,
+		plugins:   plugins,
+		now:       time.Now,
+		cipher:    newAISecretCipher(secretKey),
+		secCache:  map[string]aiSecretCacheItem{},
+		slotCache: map[string]aiSlotCacheItem{},
+		regTTL:    aiRegistryTTL,
 	}
 }
 

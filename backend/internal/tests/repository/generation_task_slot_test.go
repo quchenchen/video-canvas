@@ -16,7 +16,7 @@ import (
 // slotDB 为名额用例建独立 schema：名额的占用数是全表统计，需要和其它用例隔离。
 func slotDB(t *testing.T) *gorm.DB {
 	t.Helper()
-	return isolatedDB(t, &model.GenerationTask{}, &model.GenerationTaskEvent{}, &model.UserCredit{}, &model.CreditLedger{}, &model.AIChannel{}, &model.User{})
+	return isolatedDB(t, &model.GenerationTask{}, &model.GenerationTaskEvent{}, &model.UserCredit{}, &model.CreditLedger{}, &model.AIChannel{}, &model.AIChannelKey{}, &model.User{})
 }
 
 // slotTask 插入一个任务。held 为 true 表示已经拿到名额（slot_acquired_at 非空）。

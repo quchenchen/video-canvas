@@ -313,6 +313,11 @@ func New(mode, jwtSecret string, h Handlers) *gin.Engine {
 		channels.GET("/:key", h.AdminChannel.Get)
 		channels.PUT("/:key", superOnly, h.AdminChannel.Update)
 		channels.PUT("/:key/secret", superOnly, h.AdminChannel.SetSecret)
+		// 多 Key：列出槽位（只回显末四位）、新增、改备注 / 启停、删除；并发额度按启用的槽位数放大
+		channels.GET("/:key/keys", superOnly, h.AdminChannel.ListKeys)
+		channels.POST("/:key/keys", superOnly, h.AdminChannel.AddKey)
+		channels.PUT("/:key/keys/:slot", superOnly, h.AdminChannel.UpdateKey)
+		channels.DELETE("/:key/keys/:slot", superOnly, h.AdminChannel.DeleteKey)
 		channels.PUT("/:key/secret-key", superOnly, h.AdminChannel.SetSecretKey)
 		channels.PUT("/:key/filing-secret", superOnly, h.AdminChannel.SetFilingSecret) // 虚拟人像库的 AK/SK
 		channels.POST("/:key/pull-models", h.AdminChannel.PullModels)

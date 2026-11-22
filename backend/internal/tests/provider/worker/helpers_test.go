@@ -192,6 +192,16 @@ func setPluginState(t *model.GenerationTask, plugin json.RawMessage) {
 	t.ProviderState, _ = json.Marshal(st)
 }
 
+// setKeySlot 与真实 store 一致：多 Key 渠道把这次提交用的 Key 凭证名一起落库。
+func setKeySlot(t *model.GenerationTask, keySlot string) {
+	if keySlot == "" {
+		return
+	}
+	st, _ := provider.DecodeProviderState(t.ProviderState)
+	st.KeySlot = keySlot
+	t.ProviderState, _ = json.Marshal(st)
+}
+
 func (s *wkStore) SaveProviderState(ctx context.Context, t *model.GenerationTask, st provider.ProviderState) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -224,7 +234,7 @@ func (s *wkStore) MarkSubmitting(ctx context.Context, t *model.GenerationTask) (
 	return true, nil
 }
 
-func (s *wkStore) MarkSubmitted(ctx context.Context, t *model.GenerationTask, pid string, pluginState json.RawMessage, next time.Time) (bool, error) {
+func (s *wkStore) MarkSubmitted(ctx context.Context, t *model.GenerationTask, pid string, pluginState json.RawMessage, keySlot string, next time.Time) (bool, error) {
 	if s.beforeMarkSubmitted != nil {
 		s.beforeMarkSubmitted(t.ID)
 	}
@@ -237,11 +247,12 @@ func (s *wkStore) MarkSubmitted(ctx context.Context, t *model.GenerationTask, pi
 	}
 	cur.Status, cur.ProviderTaskID, cur.NextPollAt, cur.PollAttempts, cur.LeaseUntil = model.TaskQueued, pid, next, 0, nil
 	setPluginState(cur, pluginState)
+	setKeySlot(cur, keySlot)
 	s.rec("MarkSubmitted:%d", t.ID)
 	return true, nil
 }
 
-func (s *wkStore) MarkImmediate(ctx context.Context, t *model.GenerationTask, pid string, pluginState, outputs json.RawMessage) (bool, error) {
+func (s *wkStore) MarkImmediate(ctx context.Context, t *model.GenerationTask, pid string, pluginState json.RawMessage, keySlot string, outputs json.RawMessage) (bool, error) {
 	if s.beforeMarkSubmitted != nil {
 		s.beforeMarkSubmitted(t.ID)
 	}
@@ -255,6 +266,7 @@ func (s *wkStore) MarkImmediate(ctx context.Context, t *model.GenerationTask, pi
 	cur.Status, cur.ProviderTaskID, cur.ProviderResult = model.TaskFinalizing, pid, datatypes.JSON(outputs)
 	cur.NextPollAt, cur.PollAttempts, cur.LeaseUntil = s.clock.Now(), 0, nil
 	setPluginState(cur, pluginState)
+	setKeySlot(cur, keySlot)
 	s.rec("MarkImmediate:%d", t.ID)
 	return true, nil
 }

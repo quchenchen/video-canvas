@@ -11,6 +11,7 @@ import type {
   ChannelListItem,
   ChannelOption,
   ChannelUpdateRequest,
+  ChannelKeyView,
   ChannelLoad,
   ChannelView,
   ConfigDetail,
@@ -269,12 +270,47 @@ export const setChannelSecret = (key: string, value: string) =>
   service.put<unknown>(ep.channelSecret(key), { value });
 
 /**
- * 设置或清除渠道 Secret Key（super_admin）：可选的第二凭证，供 AK/SK 签名类协议用；只写
+ * 设置渠道 Secret Key（super_admin）：可选的第二凭证，供 AK/SK 签名类协议用；只写
  * @param key 渠道 key
  * @param value Secret Key 明文；空串表示清除
  */
 export const setChannelSecretKey = (key: string, value: string) =>
   service.put<unknown>(ep.channelSecretKey(key), { value });
+
+/**
+ * 列出渠道的多把 API Key（super_admin）：只回显槽位、末四位、备注与启停，不含明文
+ * @param key 渠道 key
+ */
+export const listChannelKeys = (key: string) => service.get<ChannelKeyView[]>(ep.channelKeys(key));
+
+/**
+ * 给渠道新增一把 API Key（super_admin）：上游按 Key 限并发时，多把 Key 能把并发叠起来；只写
+ * @param key 渠道 key
+ * @param value Key 明文
+ * @param remark 备注，如「账号 A」
+ */
+export const addChannelKey = (key: string, value: string, remark = "") =>
+  service.post<ChannelKeyView>(ep.channelKeys(key), { value, remark });
+
+/**
+ * 修改一把 Key 的备注 / 启停（super_admin）；停用后不再被轮转选中
+ * @param key 渠道 key
+ * @param slot 槽位号
+ * @param data 要改的字段
+ */
+export const updateChannelKey = (
+  key: string,
+  slot: number,
+  data: { remark?: string; enabled?: boolean },
+) => service.put<ChannelKeyView>(ep.channelKey(key, slot), data);
+
+/**
+ * 删除一把 Key（super_admin）：连同加密后的密文一起删
+ * @param key 渠道 key
+ * @param slot 槽位号
+ */
+export const deleteChannelKey = (key: string, slot: number) =>
+  service.delete<unknown>(ep.channelKey(key, slot));
 
 /**
  * 设置渠道虚拟人像库的 Access Key 与 Secret Key（super_admin）：火山引擎 / BytePlus 的 IAM 凭证，两项必填；只写

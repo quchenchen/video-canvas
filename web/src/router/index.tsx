@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { createBrowserRouter, Navigate, Outlet, useLocation } from "react-router";
 
 import { DialogHost } from "@/components/dialog-host";
+import { RouteErrorPage } from "@/components/route-error-page";
 import { WsRuntime } from "@/components/ws-runtime";
 import AdminLayout from "@/pages/admin/layout";
 import ChannelsPage from "@/pages/admin/ai/channels";
@@ -86,6 +87,12 @@ function RootLayout() {
 export const router = createBrowserRouter([
   {
     element: <RootLayout />,
+    /**
+     * 兜住懒加载路由的失败（发版后旧 chunk 已删除是最常见原因）。
+     * 不加这一层，React Router 只会抛 "Unexpected Application Error!"，
+     * 真正的原因被压掉，用户和排查者都看不出是资源失效。
+     */
+    errorElement: <RouteErrorPage />,
     children: [
       {
         path: "/login",
