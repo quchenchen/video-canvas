@@ -389,9 +389,9 @@ func NewApp(cfg *config.Config) (*App, error) {
 		CanvasArchive: handler.NewCanvasArchiveHandler(service.NewCanvasArchiveService(service.CanvasArchiveDeps{
 			Canvases: canvasProjectRepo, Assets: assetSvc, Secret: cfg.JWT.Secret,
 		})),
-		Conversation:  handler.NewConversationHandler(service.NewConversationService(repository.NewConversationRepository(db), taskSvc)),
-		AgentSkill:    agenthandler.NewSkillHandler(skillSvc),
-		AgentObserve:  agenthandler.NewAgentObserveHandler(observeSvc),
+		Conversation: handler.NewConversationHandler(service.NewConversationService(repository.NewConversationRepository(db), taskSvc)),
+		AgentSkill:   agenthandler.NewSkillHandler(skillSvc),
+		AgentObserve: agenthandler.NewAgentObserveHandler(observeSvc),
 		AnalysisToken: func(ctx context.Context, plain string) (uint64, uint64, error) {
 			who, err := observeSvc.AuthenticateToken(ctx, plain)
 			if err != nil {

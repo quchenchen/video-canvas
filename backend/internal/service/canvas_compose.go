@@ -248,82 +248,114 @@ func (s *CanvasComposeService) download(ctx context.Context, userID, assetID uin
 // commit 把成片资产登记、任务终态和画布写回放进同一个事务（评审 A10）：
 // WriteCanvas 每次重试都会重读画布，apply 必须自带事务与幂等，否则 CAS 冲突会留下“成片已落库、节点没引用”的孤儿。
 func (s *CanvasComposeService) commit(ctx context.Context, job *model.CanvasComposeJob, asset *model.Asset, durationMS int64) (uint64, error) {
-	committed := false
+	c := &composeCommit{ctx: ctx, svc: s, job: job, asset: asset, durationMS: durationMS}
 	defer func() {
-		if !committed {
+		if !c.committed {
 			s.assets.DiscardCopies(context.WithoutCancel(ctx), []*model.Asset{asset})
 		}
 	}()
-	var changes []canvasgraph.Change
-	var revBefore, revAfter uint64
-
-	_, err := WriteCanvas(ctx, s.repo, job.UserID, job.CanvasID, func(g *canvasgraph.Graph, rev uint64) (struct{}, error) {
-		var zero struct{}
-		if job.ResultAssetID != nil {
-			committed = true // 重投：上次已提交，不再重复登记素材
-			return zero, nil
-		}
-		if g.Node(job.NodeID) == nil {
-			return zero, errcode.ErrCanvasComposeNoClip.WithMsg("承载成片的节点已被删除，成片没有挂回去")
-		}
-
-		if err := s.repo.WithTx(ctx, func(tx repository.CanvasComposeTx) error {
-			current, err := tx.ComposeJobForUpdate(ctx, job.ID)
-			if err != nil {
-				return err
-			}
-			if current.Status == model.ComposeJobCanceled {
-				return errcode.ErrCanvasComposeFailed.WithMsg("合成已取消")
-			}
-			// 先登记素材拿到主键，再写 finalAssetId：顺序反了会把 0 写进画布，
-			// 表现为成片其实已生成、节点却一直显示没有成片（asset.ID 在 CreateAsset 之前恒为 0）。
-			// 主键归零是因为 WriteCanvas 遇 CAS 冲突会重跑这段，上一次事务已回滚、ID 要重新分配。
-			asset.ID = 0
-			if err := tx.CreateAsset(ctx, asset); err != nil {
-				return err
-			}
-			// Node.Data() 返回底层 map 的引用，必须先深拷贝，否则 Diff(g, g2) 恒为空、画布不会被写
-			g2 := g.Clone()
-			data := g2.Node(job.NodeID).Data()
-			data["finalAssetId"] = strconv.FormatUint(asset.ID, 10)
-			data["finalFingerprint"] = job.Fingerprint
-			data["finalDurationMs"] = float64(durationMS)
-			data["finalSegmentCount"] = float64(job.SegmentCount)
-			diff := canvasgraph.Diff(g, g2)
-
-			if err := tx.UpdateComposeJob(ctx, job.ID, map[string]any{
-				"status":          model.ComposeJobSucceeded,
-				"result_asset_id": asset.ID,
-				"duration_ms":     durationMS,
-				"segment_count":   job.SegmentCount,
-				"error":           "",
-			}); err != nil {
-				return err
-			}
-			if revAfter, err = commitComposeCanvas(ctx, tx, job.UserID, job.CanvasID, rev, g2, diff); err != nil {
-				return err
-			}
-			changes, revBefore = diff, rev
-			return nil
-		}); err != nil {
-			return zero, err
-		}
-		committed = true
-		return zero, nil
-	})
-	if err != nil {
+	if _, err := WriteCanvas(ctx, s.repo, job.UserID, job.CanvasID, c.apply); err != nil {
 		return 0, err
 	}
-	job.Status = model.ComposeJobSucceeded
-	job.ResultAssetID = &asset.ID
-	job.DurationMS = durationMS
-	// 画布改动用与 Agent 相同格式的补丁推给前端；任务状态另走自己的事件
-	PublishCanvasPatch(ctx, s.bc, job.UserID, CanvasPatch{
-		CanvasID: job.CanvasID, Kind: "compose",
-		RevisionBefore: revBefore, RevisionAfter: revAfter, Changes: changes,
-	})
-	s.publish(ctx, job)
+	c.publish()
 	return asset.ID, nil
+}
+
+// composeCommit 是一次提交的状态。WriteCanvas 可能因 CAS 冲突重跑闭包：
+// committed 要跨重试保留（重投时不再重复登记素材），素材主键则每次重试都要重新分配。
+type composeCommit struct {
+	ctx        context.Context
+	svc        *CanvasComposeService
+	job        *model.CanvasComposeJob
+	asset      *model.Asset
+	durationMS int64
+	committed  bool
+	changes    []canvasgraph.Change
+	revBefore  uint64
+	revAfter   uint64
+}
+
+// apply 是 WriteCanvas 的闭包：已经提交过的重投直接放过，其余在事务里写素材、任务终态与画布。
+func (c *composeCommit) apply(g *canvasgraph.Graph, rev uint64) (struct{}, error) {
+	if c.job.ResultAssetID != nil {
+		c.committed = true // 重投：上次已提交，不再重复登记素材
+		return struct{}{}, nil
+	}
+	err := c.svc.repo.WithTx(c.ctx, func(tx repository.CanvasComposeTx) error {
+		return c.applyTx(tx, g, rev)
+	})
+	return struct{}{}, err
+}
+
+func (c *composeCommit) applyTx(tx repository.CanvasComposeTx, g *canvasgraph.Graph, rev uint64) error {
+	current, err := tx.ComposeJobForUpdate(c.ctx, c.job.ID)
+	if err != nil {
+		return err
+	}
+	if current.Status == model.ComposeJobCanceled {
+		return errcode.ErrCanvasComposeFailed.WithMsg("合成已取消")
+	}
+	// 先登记素材拿到主键，再写 finalAssetId：顺序反了会把 0 写进画布，
+	// 表现为成片其实已生成、节点却一直显示没有成片（asset.ID 在 CreateAsset 之前恒为 0）。
+	// 主键归零是因为 WriteCanvas 遇 CAS 冲突会重跑这段，上一次事务已回滚、ID 要重新分配。
+	c.asset.ID = 0
+	if err := tx.CreateAsset(c.ctx, c.asset); err != nil {
+		return err
+	}
+	g2, diff, err := composeCanvasPatch(g, c.job, c.asset.ID, c.durationMS)
+	if err != nil {
+		return err
+	}
+	if err := tx.UpdateComposeJob(c.ctx, c.job.ID, composeJobSucceeded(c.asset.ID, c.durationMS, c.job.SegmentCount)); err != nil {
+		return err
+	}
+	if c.revAfter, err = commitComposeCanvas(c.ctx, tx, c.job.UserID, c.job.CanvasID, rev, g2, diff); err != nil {
+		return err
+	}
+	c.changes, c.revBefore, c.committed = diff, rev, true
+	return nil
+}
+
+// publish 把任务切到成功并把画布补丁推给前端：画布改动用与 Agent 相同格式的补丁，
+// 任务状态另走自己的事件。
+func (c *composeCommit) publish() {
+	c.job.Status = model.ComposeJobSucceeded
+	c.job.ResultAssetID = &c.asset.ID
+	c.job.DurationMS = c.durationMS
+	PublishCanvasPatch(c.ctx, c.svc.bc, c.job.UserID, CanvasPatch{
+		CanvasID: c.job.CanvasID, Kind: "compose",
+		RevisionBefore: c.revBefore, RevisionAfter: c.revAfter, Changes: c.changes,
+	})
+	c.svc.publish(c.ctx, c.job)
+}
+
+// composeCanvasPatch 深拷贝画布并把成片写回节点，返回新图与差异。
+// Node.Data() 返回底层 map 的引用，必须先深拷贝，否则 Diff(g, g2) 恒为空、画布不会被写。
+func composeCanvasPatch(
+	g *canvasgraph.Graph, job *model.CanvasComposeJob, assetID uint64, durationMS int64,
+) (*canvasgraph.Graph, []canvasgraph.Change, error) {
+	g2 := g.Clone()
+	node := g2.Node(job.NodeID)
+	if node == nil {
+		return nil, nil, errcode.ErrCanvasComposeNoClip.WithMsg("承载成片的节点已被删除，成片没有挂回去")
+	}
+	data := node.Data()
+	data["finalAssetId"] = strconv.FormatUint(assetID, 10)
+	data["finalFingerprint"] = job.Fingerprint
+	data["finalDurationMs"] = float64(durationMS)
+	data["finalSegmentCount"] = float64(job.SegmentCount)
+	return g2, canvasgraph.Diff(g, g2), nil
+}
+
+// composeJobSucceeded 是一次成功落库要写的字段。
+func composeJobSucceeded(assetID uint64, durationMS int64, segments int) map[string]any {
+	return map[string]any{
+		"status":          model.ComposeJobSucceeded,
+		"result_asset_id": assetID,
+		"duration_ms":     durationMS,
+		"segment_count":   segments,
+		"error":           "",
+	}
 }
 
 // failJob 业务失败：落错误、不扣费、推送；总是返回 nil（同样的输入重试结果一样）。

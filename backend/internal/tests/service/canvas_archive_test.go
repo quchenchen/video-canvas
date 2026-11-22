@@ -21,7 +21,9 @@ import (
 )
 
 // fakeArchiveCanvasRepo 是打包下载测试用的画布仓库：只实现按用户读画布。
-type fakeArchiveCanvasRepo struct{ canvases map[uint64]*model.CanvasProject }
+type fakeArchiveCanvasRepo struct {
+	canvases map[uint64]*model.CanvasProject
+}
 
 func (r *fakeArchiveCanvasRepo) GetByID(_ context.Context, userID, id uint64) (*model.CanvasProject, error) {
 	if p, ok := r.canvases[id]; ok && p.UserID == userID {

@@ -33,7 +33,6 @@ func relaxArchiveDeadline(c *gin.Context) {
 }
 
 // CanvasArchiveHandler 处理画布素材的按节点归类打包下载。
-
 type CanvasArchiveHandler struct {
 	svc *service.CanvasArchiveService
 }
