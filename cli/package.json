@@ -1,6 +1,6 @@
 {
   "name": "video-canvas-cli",
-  "version": "0.6.2",
+  "version": "0.6.3",
   "private": true,
   "description": "连镜（video-canvas）命令行：设备授权登录、画布读写、生成与合成、任务等待、运行记录导出",
   "bin": {

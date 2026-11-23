@@ -86,17 +86,22 @@ vc generate image --model <模型key> --prompt "<提示词>" \
 - `--count N` 一次多个结果，都绑同一个节点（需要 `--node`）。
 - `--ref-image` / `--ref-video` / `--ref-audio` 给素材 id（纯数字），可给多次。
 
-**首帧 / 尾帧要显式声明**：只给 `--ref-image` 时走的是「参考生成」——图片影响风格与内容，但不锁首帧。
-要钉住首帧、或首尾帧都钉住，加 `--param mode=keyframe`，此时第一张是首帧、第二张是尾帧：
+**首帧 / 尾帧用专用参数**：只给 `--ref-image` 时走的是「参考生成」——图片影响风格与内容，但不锁首帧。
+要锁帧用 `--first-frame` / `--last-frame`（内部就是 keyframe 模式，第一张为首帧、第二张为尾帧）：
 
 ```bash
 # 只锁首帧
 vc generate video --model <模型> --prompt "..." --canvas <画布> --node <节点> \
-  --param mode=keyframe --ref-image <首帧素材id>
-# 首帧 + 尾帧
+  --first-frame <首帧素材id>
+# 首尾帧都锁
 vc generate video --model <模型> --prompt "..." --canvas <画布> --node <节点> \
-  --param mode=keyframe --ref-image <首帧素材id> --ref-image <尾帧素材id>
+  --first-frame <首帧素材id> --last-frame <尾帧素材id>
 ```
+
+等价写法是 `--param mode=keyframe --ref-image A [--ref-image B]`，两套不要混用；
+`--last-frame` 不能单独给——模型把第一张图当首帧，单独给尾帧会顶到首帧位置上。
+也不要再叠 `--param mode=reference` / `--param op=t2v`（会把锁帧顶掉），或用 `--ref-audio`、`--ref-video`
+（keyframe 模式只吃首尾两张图）——这些组合 CLI 会直接报错，删掉冲突项即可。
 
 做连续多镜（含首尾循环的短片）时，让相邻两段共用一张图：上段的尾帧就是下段的头帧，
 接缝才是同一帧而不是「看起来像」；最后一段的尾帧回到第一段的首帧，循环点才闭得死。

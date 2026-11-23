@@ -58,7 +58,9 @@ generate <image|video|audio|text> --model <模型key>
          [--canvas <画布编号> --node <节点id>] [--prompt <提示词>]
          [--param 名=值]... [--input '<json>'|@文件|-]
          [--ref-image <素材id>]... [--ref-video <素材id>]... [--ref-audio <素材id>]...
-         [--param mode=keyframe]          首帧/尾帧锁定：第一张图为首帧，第二张为尾帧
+         [--first-frame <素材id> [--last-frame <素材id>]]
+                                        锁首帧 / 首尾帧（内部走 keyframe 模式；不能与 --ref-image 混用）
+         [--param mode=keyframe]          等价的底层写法：第一张图为首帧，第二张为尾帧
          [--count 1] [--wait] [--timeout 600] [--interval 3]
          [--idempotency-key <值>]
 ```

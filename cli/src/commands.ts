@@ -1217,8 +1217,30 @@ function applyFrameFlags(flags: Flags, input: Record<string, unknown>, usage: st
       "首尾帧与 --ref-image 不要混用：用 --first-frame/--last-frame 就够了",
       2,
     );
+  // 模型的模式判定是「显式 mode > op > 素材」，显式给的冲突值会把锁帧顶掉且不报错，
+  // 结果画面跟参考图毫无关系。这种自相矛盾的组合要当场拒掉，不能默默降级。
+  const mode = typeof input.mode === "string" ? input.mode : "";
+  const op = typeof input.op === "string" ? input.op : "";
+  if (mode && mode !== "keyframe")
+    throw new APIError(
+      -1,
+      `首尾帧与 --param mode=${mode} 冲突：锁帧走的是 keyframe，去掉 mode 或改成 keyframe`,
+      2,
+    );
+  if (op && op !== "i2v")
+    throw new APIError(
+      -1,
+      `首尾帧与 --param op=${op} 冲突：锁帧要走 i2v，去掉 op 或改成 i2v`,
+      2,
+    );
+  if (input.audios !== undefined || input.videos !== undefined)
+    throw new APIError(
+      -1,
+      "keyframe 模式只吃首尾两张图，--ref-audio / --ref-video 在这里不生效；要混参考请改用 --ref-image",
+      2,
+    );
   input.images = tail ? [head, tail] : [head];
-  if (input.mode === undefined) input.mode = "keyframe";
+  input.mode = "keyframe";
 }
 
 /** 这次提交里的参考图到底起什么作用，说清楚，别让人以为锁了首帧其实没有。 */
