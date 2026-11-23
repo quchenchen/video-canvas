@@ -103,7 +103,7 @@
 ## 安装、升级与配套技能
 
 CLI 单独发版，版本号与站点版本**无关**。它没有发布到 npm，安装包由你自己的站点提供，
-需要 Node 22.18 及以上（脚本会先检查）。安装包里是编译好的 JavaScript，**装的人不需要装 TypeScript、也不需要 `npm install`**——只有改源码的人需要。
+需要 Node 22.18 及以上（脚本会先检查）。安装包内是编译后的 JavaScript（`dist/`）与配套技能；源码用 TypeScript 写，仓库内开发时执行 `npm install && npm run build`。
 
 ### macOS / Linux
 
@@ -174,7 +174,7 @@ cp -R ~/.local/share/video-canvas-cli/*/skill ~/.workbuddy/skills/video-canvas-c
 
 Windows 在 `%LOCALAPPDATA%\video-canvas-cli\<版本>\lib\skill`，目标目录同理。
 
-一句话说清它不是什么：**技能只是给助手的说明书，命令仍然在本机由 `vc` 执行**。
+技能是给助手看的说明文档；命令由本机的 `vc` 执行。
 画布里的 Agent 跑在服务端、没有命令行，所以这份东西不在那边的技能库里。
 
 ## 一条主线走完：从登录到出片
@@ -205,7 +205,7 @@ vc canvas save <画布编号> --payload 画布.json --revision 3
 # ⑤ 成片：把连进成片节点的视频拼起来（顺序会先打印，再提交）
 vc canvas compose <画布编号> --node <成片节点id> --wait
 
-# ⑥ 备份 / 迁移（不在主线上，但迟早要用）：export → import，不要喂给 save
+# ⑥ 备份 / 迁移（主线之外的常用操作）：export → import（save 只接受 graph）
 vc canvas export <画布编号> -o 备份.json
 vc canvas import 备份.json
 
@@ -215,9 +215,8 @@ vc logout
 
 画布编号是 32 位十六进制串（`idcodec` 编出来的对外编号），不是数据库自增 id。
 
-**`graph` 与 `export` 别混**：`graph` 是 `{nodes, edges, viewport}`，给 `save` / `create --payload` 用；
-`export` 是带 `format` / `canvas` / `assets` 的导出文档，给 `import` 用。把导出文档喂给 `save` 会被直接拒绝
-（早期版本会把它整份写进画布，结构就坏了）。
+`graph` 与 `export` 是两种文档：`graph` 是 `{nodes, edges, viewport}`，给 `save` / `create --payload` 用；
+`export` 带 `format` / `canvas` / `assets`，给 `import` 用。把导出文档喂给 `save` 会被拒绝。
 
 `export` 不给 `-o` 时默认写当前目录的 `canvas-<编号>.json`。在仓库或项目目录里跑脚本时建议总是显式给 `-o`，
 避免多出一个未跟踪文件。
@@ -242,7 +241,7 @@ vc logout
 - `logout` 不会让服务端令牌失效：真吊销靠网页改密码（改完所有设备一起失效）。
 - `version --json` 的 `data` 是 `{name, version, channel, node, os, arch}`，版本号只读 `package.json`。
 
-**几个「有效期 / 超时」不要混**：它们在后台是不同的设置项，管不同的事，改一个不影响另一个。
+**几个「有效期 / 超时」是独立设置**：各自管一件事，改一个不影响另一个。
 
 | 名称                   | 管什么                                 | 缺省    | 在哪改                      |
 | ---------------------- | -------------------------------------- | ------- | --------------------------- |
@@ -309,8 +308,7 @@ $ vc canvas create --title "客户 A 的宣传片"
 已创建：客户 A 的宣传片（<画布编号>）版本 1
 ```
 
-没有 `--yes` / `--force` 之类开关。**批量建画布不是合法的自动化场景**：项目是要人负责命名和归属的东西，
-真要做，就在终端里逐次确认，或者回网页新建。
+确认只走终端交互。需要批量新建时，在终端逐次确认，或在网页新建。
 
 ## 三、素材：模型、积分与生成
 
@@ -390,7 +388,7 @@ vc generate video --model <视频模型key> --input '{"prompt":"…","duration":
 - 幂等：每次提交自动带一个随机 `Idempotency-Key`；要重放同一次提交（例如脚本重试），用
   `--idempotency-key <同一个值>` 才不会建出两个任务。
 - 上游失败会原样透出，例如渠道余额不足：
-  `错误：provider_balance {"code":"insufficient_user_quota",…}`。这是上游账号的问题，不是 CLI 或画布的问题。
+  `错误：provider_balance {"code":"insufficient_user_quota",…}`。这是上游账号的返回，原样透出。
 
 ### 等结果：task get / task wait
 
@@ -401,7 +399,7 @@ vc generate video --model <视频模型key> --input '{"prompt":"…","duration":
 
 - `task_ref` 是任务 id 的 32 位十六进制编码，**画布界面和日志里显示的就是它**，通常比数字 id 更好用。
 - 终态是 `succeeded` / `failed` / `canceled` / `expired`。`failed` 会带上游的 `error_code` 与 `error_message`
-  （例如 `video queue is full`），这是上游真实原因，不是 CLI 造的。
+  （例如 `video queue is full`），这是上游返回的原因。
 - `wait` 的状态变化写 stderr，最终结果写 stdout；`--json` 时 stdout 只有一行。
 - **超时（退出码 3）不等于失败**：任务可能还在跑，用 `task get` 继续查或加大 `--timeout`。
 
@@ -455,7 +453,7 @@ vc canvas node rm <画布编号> n_ab12cd34
 1. 先读当前画布，把「要改什么」逐行打到终端（新建什么节点、改哪些字段、删几个节点连带几条连线）。
 2. 等你在终端输入 `yes` 回车。输入其它内容、直接回车、按 Ctrl-C 都算取消，退出码 `4`，画布一个字节都不会改。
 3. 确认后带着**刚才读到的那个 `revision`** 提交。如果这期间画布被别人改了，服务端返回 409，
-   而不是把你没看过的版本覆盖掉。
+   未确认过的版本不会被覆盖。
 4. 服务端返回的 `changes` 才是实际落库的差异，CLI 会把它打出来。
 
 没有 `--yes`、没有 `--force`、也不能和 `--json` 一起用：**脚本无法在无人确认的情况下做节点级修改**。
@@ -598,7 +596,7 @@ vc drama job-cancel <短剧编号> --job <任务id>
 `task wait` 默认每 3 秒查一次、600 秒超时；`generate --wait` 同样的默认值；`canvas compose --wait`
 默认每 5 秒查一次、900 秒超时（合成比生成慢）。都可用 `--interval`（1–3600 秒）、`--timeout`（1–86400 秒）调。
 数值写错（如 `--timeout abc`）会直接报用法错误，不会静默退回默认值。
-登录轮询按服务端给的 `interval` 走；服务端返回 `slow_down` 时自动加 5 秒，这是限频，不是故障。
+登录轮询按服务端给的 `interval` 走；服务端返回 `slow_down` 时轮询间隔自动加 5 秒（限频信号）。
 
 `--wait` 只影响「本机等多久」，不影响任务本身：到点退出码 3，任务在服务端继续跑。
 这也是它和登录有效期、服务端调用超时完全无关的原因。
@@ -640,23 +638,19 @@ vc drama job-cancel <短剧编号> --job <任务id>
 
 ## 边界与限制
 
-**这一版 CLI 覆盖「画布读写 + 生成提交 + 成片合成 + 短剧只读」，但不替你做判断、不替你做不可逆的事。**
-下面几条是刻意没做的，不是遗漏：
+本版覆盖「画布读写 + 生成提交 + 成片合成 + 短剧只读」。范围之外的能力与原因：
 
-- **不改节点的产物字段**。生成与合成的产物由服务端/画布写回节点，CLI 不用 `canvas node set` 去改 `src`、`assetId`、
-  `outputs` 这些字段——那会绕过画布的版本归并逻辑，造成「界面显示的和库里存的不是一个东西」。
+- **不写节点的产物字段**。`src`、`assetId`、`outputs` 由服务端与画布统一写回，CLI 不参与，以免与画布的版本归并不一致。
 - **不删除画布**。没有 `canvas delete`。建错了的画布只能在前端删除，CLI 不会替你做不可逆操作。
-- **不做批量节点编辑**。`canvas node` 一次只改一个节点（`rm` 可一次删多个 id），
-  并且**必须由人在终端确认**——没有跳过确认的开关，脚本也绕不过去。要程序化批量改，用
-  `canvas graph` + `canvas save` 整图写回（同样有 `revision` 乐观锁）。
+- **不做批量节点编辑**。`canvas node` 一次改一个节点（`rm` 可一次给多个 id），且必须由人在终端确认；
+  程序化批量改写走 `canvas graph` + `canvas save` 整图写回（同样有 `revision` 乐观锁）。
 - **不做节点级扩展字段**。角色卡、分镜表、成片、导演台要填内嵌结构（人物设定、镜头行、段落顺序），
   CLI 不支持创建它们；能建的只有文本 / 图片 / 视频 / 音频四类普通节点，改的也只有标题、正文/提示词、模型。
   成片节点不新建，但可以对已有的成片节点发起合成。
 - **不跑短剧重活**。短剧的建项目、规划、生成剧本、分集出片都留在网页和 MCP：它们要长上下文、要逐步核对、
   要花大额积分，一条命令直接触发不合适。CLI 只读 + 取消任务。
 - **不封装管理端接口**。渠道、模型、用户管理这些管理员操作没有做进 CLI——脚本令牌不应该顺手改平台配置。
-- **未发布到 npm**。安装包只由站点通过 `/api/v1/cli/download` 提供，不依赖任何公共包仓库，
-  也不要求 `npm install`；离线环境可以下包后拷过去直接跑。
+- **不经公共包仓库分发**。安装包由站点通过 `/api/v1/cli/download` 提供，可离线拷贝运行。
 - **令牌等同网页登录态**。它和你浏览器里的登录是同一套 JWT：改密码会一起失效，服务端没有单独的吊销列表。
   区别只有有效期：命令行默认 30 天（后台可调），网页会话按 `jwt.expire_hours`。
 
@@ -693,5 +687,3 @@ vc drama job-cancel <短剧编号> --job <任务id>
 | 凭据     | 项目令牌 `vcm_…`，有有效期，可随时注销 | 设备授权换来的登录态，存本机    |
 | 怎么授权 | 在「MCP 接入」页签发令牌               | 执行 `vc login`，网页确认用户码 |
 | 能力范围 | 按项目勾选的权限档位                   | 与网页登录同等，限本人名下数据  |
-
-两者互不依赖：用 CLI 不需要建 MCP 项目，签发 MCP 令牌也不影响 CLI 的登录态。

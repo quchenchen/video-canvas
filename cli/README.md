@@ -37,8 +37,7 @@ mkdir -p ~/.claude/skills && cp -R ~/.local/share/video-canvas-cli/*/skill ~/.cl
 
 ## 开发（改源码才需要）
 
-源码是 TypeScript（`src/*.ts`），装好的包与镜像里用的是编译产物 `dist/*.js`，
-**装的人不需要 TypeScript，也不需要 `npm install`**。
+源码是 TypeScript（`src/*.ts`）；安装包与镜像内是编译产物 `dist/*.js`。
 
 ```bash
 cd cli

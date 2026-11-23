@@ -151,9 +151,9 @@ mkdir -p ~/.claude/skills && cp -R ~/.local/share/video-canvas-cli/*/skill ~/.cl
 
       <Panel title="配套技能" className="mb-4">
         <p className="text-muted-foreground text-xs">
-          安装包里带一份技能手册：告诉终端里的 AI 助手（Claude Code、Codex、WorkBuddy
-          等）什么时候该用 <code>vc</code>、模型与参数怎么查、节点 id 怎么挑、哪些操作要人确认。
-          它不参与 <code>vc</code> 运行，只是给助手看的说明，装完就在安装目录下。
+          安装包附带一份技能文档，供终端里的 AI 助手（Claude Code、Codex、WorkBuddy
+          等）查阅：适用场景、模型与参数的查询方式、节点 id 的选取方法、需要人工确认的操作。
+          文档随安装包放在安装目录下。
         </p>
         <CopyBlock>
           <CopyBlockHeader>
