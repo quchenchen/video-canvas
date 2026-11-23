@@ -17,6 +17,7 @@ type Handlers struct {
 	User           *handler.UserHandler
 	Me             *handler.MeHandler // 个人中心：资料、头像、改密码、统计、热力图、积分流水
 	CanvasProject  *handler.CanvasProjectHandler
+	CanvasOps      *handler.CanvasOpsHandler      // 节点级编辑：只提交差异，服务端用 canvasgraph 应用
 	CanvasTransfer *handler.CanvasTransferHandler // 画布导出为文档、从文档导入为新画布
 	Storyboard     *handler.StoryboardHandler     // 画布分镜表：从剧本拆分镜
 	CanvasCompose  *handler.CanvasComposeHandler  // 画布成片合成：把已生成的片段按顺序拼成一个 mp4
@@ -170,6 +171,7 @@ func New(mode, jwtSecret string, h Handlers) *gin.Engine {
 		canvas.GET("", h.CanvasProject.List)
 		canvas.GET("/:id", h.CanvasProject.Get)
 		canvas.PUT("/:id", h.CanvasProject.Update)
+		canvas.POST("/:id/ops", h.CanvasOps.Apply) // 节点级编辑：ops + deleteNodeIds，带 revision 乐观锁
 		canvas.DELETE("/:id", h.CanvasProject.Delete)
 		canvas.GET("/:id/export", h.CanvasTransfer.Export)
 		canvas.POST("/import", h.CanvasTransfer.Import)

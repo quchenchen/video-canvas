@@ -415,6 +415,7 @@ func NewApp(cfg *config.Config) (*App, error) {
 		CLIRelease:      handler.NewCLIReleaseHandler(cliReleaseSvc, cfg.Server.PublicURL),
 		Me:              handler.NewMeHandler(meSvc),
 		CanvasProject:   handler.NewCanvasProjectHandler(canvasProjectSvc),
+		CanvasOps:       handler.NewCanvasOpsHandler(canvasProjectSvc),
 		Drama:           handler.NewDramaHandler(dramaSvc),
 		AdminStep:       handler.NewAdminStepHandler(stepSvc),
 		AdminFormatter:  handler.NewAdminFormatterHandler(),

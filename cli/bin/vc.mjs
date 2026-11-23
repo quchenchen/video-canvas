@@ -14,6 +14,9 @@ import {
   canvasGraph,
   canvasImport,
   canvasList,
+  canvasNodeAdd,
+  canvasNodeRm,
+  canvasNodeSet,
   canvasSave,
   login,
   logout,
@@ -45,6 +48,13 @@ const USAGE = `video-canvas-cli（beta）— 连镜命令行
   canvas save <code> --payload 文件 [--revision N]
                                         要 canvas graph 的输出，不是 canvas export 的导出文档
 
+节点级编辑（每次都要在终端确认）
+  canvas node add <code> --kind <script|image|video|audio> [--label 标题] [--text 正文] [--prompt 提示词]
+                        [--model 模型] [--at x,y]
+  canvas node set <code> <节点id> [--label 标题] [--text 正文] [--prompt 提示词] [--model 模型]
+  canvas node rm <code> <节点id> [更多节点id...]
+                                        只提交差异；服务端按 revision 乐观锁写入
+
 生成任务
   task get <id|task_ref>
   task wait <id|task_ref> [--timeout 600] [--interval 3]
@@ -62,7 +72,7 @@ const USAGE = `video-canvas-cli（beta）— 连镜命令行
 版本
   version         打印 CLI 版本（与站点版本独立）；加 --json 输出机器可读信息
 
-退出码：0 成功，1 业务或网络错误（含任务失败），2 用法错误，3 task wait 等待超时
+退出码：0 成功，1 业务或网络错误（含任务失败），2 用法错误，3 task wait 等待超时，4 节点级修改被取消
 
 当前是 beta 渠道：命令与参数尽量稳定，但输出格式和提示语仍可能调整。
 升级提示写在 stderr；非交互终端与 --json 场景不会打扰脚本。
@@ -87,8 +97,27 @@ async function runCanvas(ctx, positional, flags) {
       return canvasGraph(ctx, args);
     case "save":
       return canvasSave(ctx, args);
+    case "node":
+      return runCanvasNode(ctx, rest, flags);
     default:
       throw new APIError(-1, `未知的 canvas 子命令：${sub || "（空）"}\n\n${USAGE}`, 2);
+  }
+}
+
+/** 节点级编辑子命令：每次都走人工确认，没有跳过确认的开关。 */
+async function runCanvasNode(ctx, positional, flags) {
+  const [sub, code, ...rest] = positional;
+  const args = { positional: [code, ...rest], flags };
+  switch (sub) {
+    case "add":
+      return canvasNodeAdd(ctx, args);
+    case "set":
+      return canvasNodeSet(ctx, args);
+    case "rm":
+    case "delete":
+      return canvasNodeRm(ctx, args);
+    default:
+      throw new APIError(-1, `未知的 canvas node 子命令：${sub || "（空）"}\n\n${USAGE}`, 2);
   }
 }
 
