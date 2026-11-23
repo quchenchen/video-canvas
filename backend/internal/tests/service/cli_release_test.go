@@ -72,7 +72,15 @@ func TestCLIReleasePackages(t *testing.T) {
 	if !strings.HasSuffix(name, ".tgz") {
 		t.Fatalf("unix 包名 = %q，期望 .tgz", name)
 	}
-	for _, want := range []string{"package.json", "dist/cli.js", "dist/client.js"} {
+	for _, want := range []string{
+		"package.json",
+		"dist/cli.js",
+		"dist/client.js",
+		// 配套技能跟着包走：用户装完才有东西可放进自己的助手
+		"skill/SKILL.md",
+		"skill/references/commands.md",
+		"skill/scripts/node-pick.ts",
+	} {
 		if !hasName(tarNames(t, data), want) {
 			t.Fatalf("tgz 缺少 %s，实际 %v", want, tarNames(t, data))
 		}
@@ -136,6 +144,9 @@ func TestCLIInstallScript(t *testing.T) {
 		"JSON.parse(s).data.version", // 接口是 {code,msg,data} 信封，版本在 data 里
 		"~/.local",
 		"ln -sf",
+		// 技能随包安装，装完必须告诉人它在哪、怎么交给助手
+		`$SHARE/skill`,
+		"配套技能",
 	} {
 		if !strings.Contains(unix, want) {
 			t.Fatalf("Unix 脚本缺少 %q", want)
@@ -152,6 +163,8 @@ func TestCLIInstallScript(t *testing.T) {
 		".data.version",
 		"Expand-Archive",
 		"LOCALAPPDATA",
+		`$Lib\skill`,
+		"配套技能",
 	} {
 		if !strings.Contains(ps, want) {
 			t.Fatalf("Windows 脚本缺少 %q", want)

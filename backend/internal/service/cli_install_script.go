@@ -5,7 +5,7 @@ import "strings"
 // 安装脚本模板：把 __BASE__ 换成请求方看到的站点地址（换域名、走内网、挂子路径都自动跟着变）。
 //
 // 两个脚本的共同约定：
-//   - 只依赖系统自带工具 + Node（CLI 本身就要 Node 18+），不要求 curl 之外的东西；
+//   - 只依赖系统自带工具 + Node（CLI 与随包技能都要求 Node 22.18+），不要求 curl 之外的东西；
 //   - 版本向服务端要（/api/v1/cli/release），脚本里不写死版本，升级只要重跑同一条命令；
 //   - 安装位置可覆盖（VC_PREFIX），卸载就是删掉那个目录 + 两个软链。
 //
@@ -23,13 +23,13 @@ API="$VC_BASE/api/v1/cli"
 say() { printf '%s\n' "$*"; }
 die() { printf '错误：%s\n' "$*" >&2; exit 1; }
 
-command -v node >/dev/null 2>&1 || die "需要 Node.js 18 或更高版本，见 https://nodejs.org/zh-cn/download"
+command -v node >/dev/null 2>&1 || die "需要 Node.js 22.18 或更高版本，见 https://nodejs.org/zh-cn/download"
 # 找到 node 不等于能用：二进制与系统 glibc 不匹配时，命令存在但一执行就报错。
 # 这种情况必须单独说清，否则「版本过低」会把人引去升级 Node，升完照样跑不动。
 NODE_VERSION=$(node -v 2>/dev/null) \
-  || die "找到了 node（$(command -v node)）但无法执行：可能是二进制与系统库不匹配，请换一个能在本机运行的 Node 18+"
-node -e 'process.exit(Number(process.versions.node.split(".")[0]) >= 18 ? 0 : 1)' \
-  || die "Node.js 版本过低（当前 ${NODE_VERSION}），需要 18 或更高"
+  || die "找到了 node（$(command -v node)）但无法执行：可能是二进制与系统库不匹配，请换一个能在本机运行的 Node 22.18+"
+node -e 'const [a,b]=process.versions.node.split(".").map(Number);process.exit(a>22||(a===22&&b>=18)?0:1)' \
+  || die "Node.js 版本过低（当前 ${NODE_VERSION}），需要 22.18 或更高"
 
 # 版本以服务端为准：脚本不写死版本，升级重跑同一条命令即可
 VERSION="${VC_VERSION:-}"
@@ -64,6 +64,10 @@ ln -sf "$SHARE/dist/cli.js" "$BIN/vc"
 ln -sf "$SHARE/dist/cli.js" "$BIN/video-canvas-cli"
 
 say "已装好：$("$BIN/vc" --version 2>/dev/null || echo "video-canvas-cli $INSTALLED")"
+say ""
+say "配套技能：$SHARE/skill"
+say "  给 Claude Code / Codex / WorkBuddy 这类终端助手看的手册，拷进它们的技能目录即可，例如："
+say "  mkdir -p ~/.claude/skills && cp -R \"$SHARE/skill\" ~/.claude/skills/video-canvas-cli"
 case ":$PATH:" in
   *":$BIN:"*) ;;
   *)
@@ -87,13 +91,13 @@ $Api = "$Base/api/v1/cli"
 function Fail($message) { throw "错误：$message" }
 
 $node = Get-Command node -ErrorAction SilentlyContinue
-if (-not $node) { Fail '需要 Node.js 18 或更高版本，见 https://nodejs.org/zh-cn/download' }
+if (-not $node) { Fail '需要 Node.js 22.18 或更高版本，见 https://nodejs.org/zh-cn/download' }
 $nodeVersion = & node -v 2>$null
 if ($LASTEXITCODE -ne 0 -or -not $nodeVersion) {
-  Fail "找到了 node（$($node.Source)）但无法执行，请换一个能在本机运行的 Node 18+"
+  Fail "找到了 node（$($node.Source)）但无法执行，请换一个能在本机运行的 Node 22.18+"
 }
-& node -e "process.exit(Number(process.versions.node.split('.')[0]) >= 18 ? 0 : 1)"
-if ($LASTEXITCODE -ne 0) { Fail "Node.js 版本过低（当前 ${nodeVersion}），需要 18 或更高" }
+& node -e "const [a,b]=process.versions.node.split('.').map(Number);process.exit(a>22||(a===22&&b>=18)?0:1)"
+if ($LASTEXITCODE -ne 0) { Fail "Node.js 版本过低（当前 ${nodeVersion}），需要 22.18 或更高" }
 
 $Version = $env:VC_VERSION
 if (-not $Version) {
@@ -145,6 +149,10 @@ if ($parts -notcontains $BinDir) {
 $env:Path = "$BinDir;$env:Path"
 
 Write-Host ('已装好：' + (& node "$Lib\dist\cli.js" --version))
+Write-Host ''
+Write-Host "配套技能：$Lib\skill"
+Write-Host '  给 Claude Code / Codex / WorkBuddy 这类终端助手看的手册，拷进它们的技能目录即可，例如：'
+Write-Host "  New-Item -ItemType Directory -Force -Path \"$env:USERPROFILE\.claude\skills\" | Out-Null; Copy-Item -Recurse '$Lib\skill' \"$env:USERPROFILE\.claude\skills\video-canvas-cli\""
 Write-Host "下一步：vc login --base $Base"
 `
 

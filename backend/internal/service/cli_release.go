@@ -34,7 +34,9 @@ const (
 	CLIOSWindows = "windows"
 
 	// CLINodeRange 是安装脚本会检查的最低 Node 版本。
-	CLINodeRange = ">=18"
+	// 定在 22.18：CLI 本体是编译后的 JS，但随包下发的技能脚本是 .ts，
+	// Node 从 22.18 起才默认支持直接执行 .ts（类型擦除），低于它得带实验开关。
+	CLINodeRange = ">=22.18"
 
 	// cliDownloadPath 是安装脚本与下载链接共用的路径，改路由时一起改。
 	cliDownloadPath = "/api/v1/cli/download"
@@ -107,11 +109,14 @@ func locateCLIDir(dir string) string {
 	return ""
 }
 
-// cliPackagedFiles 收集要打进包的文件：只有运行需要的那几项。
+// cliPackagedFiles 收集要打进包的文件：运行需要的那些，加上配套技能。
 //
 // 源码是 TypeScript（cli/src/*.ts），安装包里放的是 tsc 的产物（cli/dist/*.js）：
 // 用户机器只需要 Node，不需要 TypeScript 或任何构建步骤。测试、node_modules、
-// 构建配置都不进包，装完的目录就是「够跑」的最小集合。
+// 构建配置都不进包。
+//
+// skill/ 是给终端里的 AI 助手用的操作手册（SKILL.md + references + 一个挑节点的小脚本），
+// 不参与 vc 运行，但跟着包走用户才拿得到——CLI 装完没法再从别处取这份东西。
 //
 // dist 缺失时返回空列表——宁可让接口报 501（并打日志），也不能下发一个没有代码的包：
 // 装出来的 vc 会在第一次调用时莫名其妙地找不到命令。
@@ -120,13 +125,14 @@ func cliPackagedFiles(root string) []string {
 		switch {
 		case rel == "package.json", rel == "README.md":
 			return true
-		case strings.HasPrefix(rel, "dist"+string(filepath.Separator)):
+		case strings.HasPrefix(rel, "dist"+string(filepath.Separator)),
+			strings.HasPrefix(rel, "skill"+string(filepath.Separator)):
 			return true
 		}
 		return false
 	}
 	var out []string
-	for _, dir := range []string{"dist"} {
+	for _, dir := range []string{"dist", "skill"} {
 		_ = filepath.WalkDir(filepath.Join(root, dir), func(p string, d fs.DirEntry, err error) error {
 			if err != nil || d.IsDir() {
 				return nil //nolint:nilerr // 缺目录就当没有：打包时按现有文件来

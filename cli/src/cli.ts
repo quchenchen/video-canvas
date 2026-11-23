@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // video-canvas-cli：连镜的命令行入口。
-// 运行时只依赖 Node 18+ 内置能力；源码是 TypeScript，构建产物是 dist/cli.js。
+// 运行时只依赖 Node 22.18+ 内置能力（技能脚本是 .ts，需要默认的类型擦除）；源码是 TypeScript，构建产物是 dist/cli.js。
 
 import fs from "node:fs";
 import path from "node:path";

@@ -21,7 +21,19 @@ curl -fsSL https://你的站点/api/v1/cli/install.sh | sh
 irm https://你的站点/api/v1/cli/install.ps1 | iex
 ```
 
-运行时零第三方依赖，需要 Node 18+。`vc --version` 打印自己的版本，`vc --version --json` 给脚本读。
+运行时零第三方依赖，需要 Node 22.18+（技能脚本直接跑 .ts）。`vc --version` 打印自己的版本，`vc --version --json` 给脚本读。
+
+## 配套技能
+
+安装包里带一份 `skill/`：给终端里的 AI 助手（Claude Code、Codex、WorkBuddy 等）看的操作手册。
+它不参与 `vc` 运行，放在安装目录下，拷进助手的技能目录即可：
+
+```bash
+ls -d ~/.local/share/video-canvas-cli/*/skill
+mkdir -p ~/.claude/skills && cp -R ~/.local/share/video-canvas-cli/*/skill ~/.claude/skills/video-canvas-cli
+```
+
+`skill/` 是随包发布的正文，改它等于改用户拿到的东西；`cli-docs.md` 是站点文档，两者分工不同。
 
 ## 开发（改源码才需要）
 
