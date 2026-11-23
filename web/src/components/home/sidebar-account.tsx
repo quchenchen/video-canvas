@@ -33,11 +33,16 @@ export function SidebarAccount({ children }: { children?: ReactNode }) {
         <User />
         个人中心
       </DropdownMenuItem>
-      {/* 任何用户都能给自己开接入：外部 AI 工具读写自己名下的画布，不用等管理员 */}
-      <DropdownMenuItem onClick={() => navigate("/mcp")}>
-        <Cable />
-        我的 MCP 接入
-      </DropdownMenuItem>
+      {/*
+        给普通用户的入口。管理员在后台侧栏已经有「MCP 接入」，账号菜单里再出现一遍就是重复，
+        所以只对非管理员显示；普通用户没有后台入口，仍然只能从这里进。
+      */}
+      {!isAdmin && (
+        <DropdownMenuItem onClick={() => navigate("/mcp")}>
+          <Cable />
+          我的 MCP 接入
+        </DropdownMenuItem>
+      )}
       {children}
     </NavUser>
   );
