@@ -381,17 +381,27 @@ export async function canvasGet(ctx, args) {
 
 export async function canvasCreate(ctx, args) {
   const token = requireToken(ctx);
+  const usage = "canvas create --title <标题> [--payload 文件]";
   const title =
-    args.flags.title === undefined
-      ? "未命名画布"
-      : stringFlag(args.flags, "title", "canvas create --title <标题> [--payload 文件]");
+    args.flags.title === undefined ? "未命名画布" : stringFlag(args.flags, "title", usage);
   const payload =
     args.flags.payload === undefined
       ? { nodes: [], edges: [], viewport: { x: 0, y: 0, zoom: 1 } }
-      : readJSONFile(
-          stringFlag(args.flags, "payload", "canvas create --title <标题> [--payload 文件]"),
-        );
+      : readJSONFile(stringFlag(args.flags, "payload", usage));
   assertGraphPayload(payload, "canvas create");
+
+  const nodes = payload.nodes || [];
+  const edges = payload.edges || [];
+  await confirmCreate(ctx, {
+    what: "canvas create",
+    title,
+    lines: [
+      `内容：${nodes.length ? `${nodes.length} 个节点、${edges.length} 条连线` : "空白画布"}`,
+      `来源：${args.flags.payload === undefined ? "命令行参数（无 payload）" : "命令行参数 --payload"}`,
+    ],
+    hint: "要在脚本里批量建画布，只能在终端里逐次确认；CLI 没有跳过确认的开关。",
+  });
+
   const canvas = await request({
     base: baseOf(ctx),
     token,
@@ -408,6 +418,19 @@ export async function canvasImport(ctx, args) {
   const file = args.positional[0] ?? args.flags.file;
   if (file === undefined) throw new APIError(-1, "用法：canvas import <导出文件.json>", 2);
   const document = readJSONFile(file);
+  const source = document.canvas || {};
+  const assets = Array.isArray(document.assets)
+    ? document.assets.length
+    : Object.keys(document.assets || {}).length;
+  await confirmCreate(ctx, {
+    what: "canvas import",
+    title: source.title || "（导出文档里没有标题）",
+    lines: [
+      `来源：${typeof file === "string" ? path.resolve(file) : file}`,
+      `内容：${(source.nodes || []).length} 个节点、${(source.edges || []).length} 条连线、${assets} 份素材`,
+    ],
+    hint: "导入只新建画布，不会覆盖已有画布；已存在的画布请用 canvas save 改。",
+  });
   const result = await request({
     base: baseOf(ctx),
     token,
@@ -556,6 +579,52 @@ function formatChanges(res) {
 }
 
 /**
+ * 等人点头的唯一出口：只认终端里敲的 `yes`。
+ * 取消用退出码 4（与「被取消」区分于「失败」），非交互终端与 --json 一律拒绝。
+ */
+async function askYes(ctx, question, cancelMessage) {
+  const rl = readline.createInterface({ input: process.stdin, output: process.stderr });
+  let answer = "";
+  try {
+    answer = await rl.question(question);
+  } finally {
+    rl.close();
+  }
+  if (answer.trim() !== "yes") throw new APIError(-1, cancelMessage, 0, 4);
+}
+
+/**
+ * 新建项目（画布）前的硬门禁。
+ *
+ * 为什么单独设这道门：`canvas create` / `canvas import` 会在账号下**新增**一张画布，
+ * 而命令行是能被脚本/Agent 批量调用的——没有拦截的话，一次循环就能堆出几十张没人知道的空项目，
+ * 事后还得有人去前端一张张删（CLI 本身没有 delete）。节点级修改只是改已有画布，这道门管的是「新建」这类动作。
+ *
+ * 三道门与节点级修改一致：--json 不可用（脚本无法"确认"）、stdin/stderr 必须是终端、必须输入 yes。
+ */
+async function confirmCreate(ctx, { what, title, lines, hint }) {
+  if (ctx.json)
+    throw new APIError(
+      -1,
+      `\`${what}\` 会在账号下新建项目，必须先由人确认，不能与 --json 一起用；${hint}`,
+      2,
+    );
+  if (!process.stdin.isTTY || !process.stderr.isTTY)
+    throw new APIError(
+      -1,
+      [
+        `\`${what}\` 需要交互确认：新建项目会在账号下留下新画布，当前终端不是交互式的，已拒绝执行。`,
+        `请在终端里手动执行；${hint}`,
+      ].join("\n"),
+      2,
+    );
+  ctx.stderr(`将新建画布：`);
+  ctx.stderr(`  标题：${title}`);
+  for (const line of lines) ctx.stderr(`  ${line}`);
+  await askYes(ctx, `确认新建？输入 yes 回车，其它任意输入取消：`, "已取消，没有新建任何画布");
+}
+
+/**
  * 节点级改动的唯一出口：先读当前图、把要改的内容摆给人看、等终端确认，
  * 确认后带「刚才读到的那个 revision」提交。
  *
@@ -588,15 +657,7 @@ async function commitNodeOps(ctx, code, build) {
   ctx.stderr(`画布：${canvas.title}（${code}）当前版本 ${canvas.revision}`);
   ctx.stderr("将提交以下改动：");
   for (const line of lines) ctx.stderr(`  ${line}`);
-
-  const rl = readline.createInterface({ input: process.stdin, output: process.stderr });
-  let answer = "";
-  try {
-    answer = await rl.question("确认执行？输入 yes 回车，其它任意输入取消：");
-  } finally {
-    rl.close();
-  }
-  if (answer.trim() !== "yes") throw new APIError(-1, "已取消，画布未修改", 0, 4);
+  await askYes(ctx, "确认执行？输入 yes 回车，其它任意输入取消：", "已取消，画布未修改");
 
   const body = { revision: canvas.revision };
   if (ops?.length) body.ops = ops;

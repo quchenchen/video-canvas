@@ -110,7 +110,7 @@ const USAGE = `video-canvas-cli（beta）— 连镜命令行
   --no-update-check  本次不检查新版本（也可用 VC_NO_UPDATE_CHECK=1）
 
 退出码：0 成功，1 业务或网络错误（含任务失败），2 用法错误，
-        3 等待超时（--wait / task wait），4 节点级修改被取消
+        3 等待超时（--wait / task wait），4 新建项目或节点级修改被取消
 
 当前是 beta 渠道：命令与参数尽量稳定，但输出格式和提示语仍可能调整。
 升级提示写在 stderr；非交互终端与 --json 场景不会打扰脚本。

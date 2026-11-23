@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import http from "node:http";
 import os from "node:os";
@@ -83,6 +83,29 @@ async function fakeSite() {
     if (req.method === "GET" && /^\/api\/v1\/generation-tasks\/\d+$/.test(p)) {
       state.polls++;
       return send(res, { code: 0, data: state.task });
+    }
+    if (req.method === "POST" && p === "/api/v1/canvas") {
+      const body = await readBody(req);
+      state.posts.push(body);
+      return send(res, {
+        code: 0,
+        data: { id: "c_new", title: body.title, revision: 1, payload_json: body.payload_json },
+      });
+    }
+    if (req.method === "POST" && p === "/api/v1/canvas/import") {
+      const body = await readBody(req);
+      state.posts.push(body);
+      return send(res, {
+        code: 0,
+        data: {
+          canvas: {
+            id: "c_imported",
+            title: body.document?.canvas?.title || "导入的画布",
+            revision: 1,
+          },
+          report: { assets: { copied: 1, total: 1, missing: [] }, edges_dropped: 0 },
+        },
+      });
     }
     if (req.method === "GET" && /^\/api\/v1\/canvas\/[^/]+$/.test(p)) {
       return send(res, {
@@ -628,4 +651,110 @@ test("parseArgs：多值 flag 收成数组，单值 flag 仍然后者生效", as
   ]);
   assert.deepEqual(flags.param, ["a=1", "b=2"]);
   assert.equal(flags.label, "第二次");
+});
+
+// ---------------------------------------------------------------------------
+// 新建项目（画布）必须由人确认：脚本不该能在无人知情时堆出一堆项目
+// ---------------------------------------------------------------------------
+
+/** 用伪终端跑一次，模拟真人敲 yes / no（借 python3 造 pty，与 node-ops 同一套办法）。 */
+function runInPty(args, env, input) {
+  const helper = path.join(here, "helpers", "pty_run.py");
+  return new Promise((resolve) => {
+    const child = spawn("python3", [helper, process.execPath, bin, ...args], {
+      env: { ...process.env, VC_NO_UPDATE_CHECK: "1", PTY_INPUT: input, ...env },
+    });
+    let out = "";
+    child.stdout.on("data", (c) => (out += c));
+    child.stderr.on("data", (c) => (out += c));
+    child.on("close", (code) => resolve({ code, out }));
+  });
+}
+
+const hasPty = spawnSync("python3", ["-c", "import pty"], { encoding: "utf8" }).status === 0;
+
+test("canvas create：非交互终端直接拒绝，且不发出建画布请求", async () => {
+  const site = await fakeSite();
+  try {
+    const env = { XDG_CONFIG_HOME: tempConfig(site.base) };
+    const { code, stderr } = await run(["canvas", "create", "--title", "不该建出来"], env);
+    assert.equal(code, 2);
+    assert.match(stderr, /需要交互确认/);
+    assert.equal(site.posts.length, 0, "拒绝时不能建画布");
+  } finally {
+    await site.close();
+  }
+});
+
+test("canvas create：--json 一律拒绝（没有脚本旁路）", async () => {
+  const site = await fakeSite();
+  try {
+    const env = { XDG_CONFIG_HOME: tempConfig(site.base) };
+    const { code, stdout } = await run(["canvas", "create", "--title", "x", "--json"], env);
+    assert.equal(code, 2);
+    assert.match(stdout, /不能与 --json 一起用/);
+    assert.equal(site.posts.length, 0);
+  } finally {
+    await site.close();
+  }
+});
+
+test("canvas create：终端里输入 yes 才建，并把标题传给服务端", { skip: !hasPty }, async () => {
+  const site = await fakeSite();
+  try {
+    const env = { XDG_CONFIG_HOME: tempConfig(site.base) };
+    const { code, out } = await runInPty(
+      ["canvas", "create", "--title", "确认过的画布"],
+      env,
+      "yes",
+    );
+    assert.equal(code, 0, out);
+    assert.match(out, /将新建画布/);
+    assert.match(out, /已创建：确认过的画布/);
+    assert.equal(site.posts.length, 1);
+    assert.equal(site.posts[0].title, "确认过的画布");
+  } finally {
+    await site.close();
+  }
+});
+
+test("canvas create：输入 yes 以外的东西算取消，退出码 4 且不建", { skip: !hasPty }, async () => {
+  const site = await fakeSite();
+  try {
+    const env = { XDG_CONFIG_HOME: tempConfig(site.base) };
+    const { code, out } = await runInPty(["canvas", "create", "--title", "不该建出来"], env, "n");
+    assert.equal(code, 4);
+    assert.match(out, /已取消，没有新建任何画布/);
+    assert.equal(site.posts.length, 0);
+  } finally {
+    await site.close();
+  }
+});
+
+test("canvas import：确认后按导出文档新建，并把文档原样传给服务端", { skip: !hasPty }, async () => {
+  const site = await fakeSite();
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "vc-import-"));
+  const file = path.join(dir, "export.json");
+  fs.writeFileSync(
+    file,
+    JSON.stringify({
+      format: "video-canvas/canvas",
+      canvas: { title: "被导入的画布", nodes: [{ id: "n1" }], edges: [] },
+      assets: { a1: { url: "x" } },
+    }),
+  );
+  try {
+    const env = { XDG_CONFIG_HOME: tempConfig(site.base) };
+    const no = await run(["canvas", "import", file], env);
+    assert.equal(no.code, 2, "非交互终端应拒绝");
+    assert.equal(site.posts.length, 0);
+
+    const { code, out } = await runInPty(["canvas", "import", file], env, "yes");
+    assert.equal(code, 0, out);
+    assert.match(out, /被导入的画布/);
+    assert.equal(site.posts.length, 1);
+    assert.equal(site.posts[0].document.canvas.title, "被导入的画布");
+  } finally {
+    await site.close();
+  }
 });

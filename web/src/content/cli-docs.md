@@ -23,14 +23,14 @@
   canvas export <code> [-o 文件]                   导出文档（含素材引用），备份 / 迁移用
 
 改画布
-  canvas create --title <标题> [--payload 文件]    新建；--payload 要 graph 的形态
+  canvas create --title <标题> [--payload 文件]    新建画布（需终端确认）；--payload 要 graph 的形态
   canvas save <code> --payload 文件 [--revision N] 整图保存（乐观锁）
   canvas node add <code> --kind <种类> [--label 标题] [--text 正文] [--prompt 提示词]
                         [--model 模型] [--at x,y]  新增单个节点（需终端确认）
   canvas node set <code> <节点id> [--label 标题] [--text 正文] [--prompt 提示词] [--model 模型]
                                                    修改单个节点（需终端确认）
   canvas node rm <code> <节点id>...                删除节点，连带清理连线与引用（需终端确认）
-  canvas import <导出文件.json>                     从导出文档新建一张画布
+  canvas import <导出文件.json>                     从导出文档新建画布（需终端确认）
 
 模型与积分
   model list [--kind image|video|audio|text]       可用模型：key、种类、说明
@@ -152,7 +152,7 @@ curl -fsSL https://你的站点/api/v1/cli/download?os=windows -o video-canvas-c
 ### 自检
 
 ```bash
-vc --version          # video-canvas-cli 0.3.1
+vc --version          # video-canvas-cli 0.3.3
 vc --version --json   # {"ok":true,"data":{...,"node":"v22.22.2","os":"darwin","arch":"x64"}}
 ```
 
@@ -278,7 +278,7 @@ vc logout
 | 1      | 业务错误、网络错误，或 `task wait` 等到了失败终态                         | 读 stderr / `--json` 的 `error`，不要盲目重试               |
 | 2      | 用法错误：参数缺失或非法、文件名写错、命令不存在、`--base` 写法错         | 修命令行本身                                                |
 | 3      | 等待超时：`--wait` / `task wait` 到点还没结束，**任务仍在跑，不代表失败** | 用 `task get` / `compose-status` 继续查，或加大 `--timeout` |
-| 4      | 节点级修改被取消（没输入 `yes`，或非交互终端被拒绝）                      | 想要就重跑并在终端里确认                                    |
+| 4      | 新建项目 / 节点级修改被取消（没输入 `yes`，或非交互终端被拒绝）           | 想要就重跑并在终端里确认                                    |
 
 **超时与失败必须分开**：把超时当失败会导致「任务其实成功了，脚本却重跑一遍，白烧积分」。
 这是实测踩过的坑，所以单独给了退出码 3。
@@ -395,6 +395,28 @@ vc canvas node rm <画布编号> n_ab12cd34
 - 节点 id 不存在，或想删的是组（组里还有成员，一次删除会静默拆散整组）。
 - 按 `assetId` 建节点：素材归属不在这里校验，需要参考素材请用连线。
 - 操作不合法（例如给导演台节点写提示词、给文本节点设模型）——与 Agent 的规则完全一致。
+
+#### 新建项目的确认（`canvas create` / `canvas import`）
+
+这两条命令会在账号下**新增**一张画布。命令行是能被脚本与 Agent 调用的，一个循环就能堆出几十张没人知道的空项目，
+而 CLI 本身没有删除画布的能力，只能事后去前端一张张删。所以这里和节点级修改用同一道门：
+
+1. 先把「要建什么」打出来：标题、节点与连线数量（或素材份数）、来源文件。
+2. 等你在终端输入 `yes` 回车；其它输入、回车、Ctrl-C 都算取消，**退出码 4，一个画布都不会建**。
+3. `--json` 与「stdin / stderr 不是终端」一律拒绝（退出码 2）——脚本无法在无人确认时新建项目。
+
+```bash
+$ vc canvas create --title "客户 A 的宣传片"
+将新建画布：
+  标题：客户 A 的宣传片
+  内容：空白画布
+  来源：命令行参数（无 payload）
+确认新建？输入 yes 回车，其它任意输入取消：yes
+已创建：客户 A 的宣传片（<画布编号>）版本 1
+```
+
+没有 `--yes` / `--force` 之类开关。**批量建画布不是合法的自动化场景**：项目是要人负责命名和归属的东西，
+真要做，就在终端里逐次确认，或者回网页新建。
 
 ### 模型与积分
 

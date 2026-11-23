@@ -52,8 +52,8 @@ video-canvas-cli logout     # 删除本地凭据
 ```bash
 video-canvas-cli canvas list
 video-canvas-cli canvas get <code>
-video-canvas-cli canvas create --title "新项目" [--payload graph.json]
-video-canvas-cli canvas import export.json
+video-canvas-cli canvas create --title "新项目" [--payload graph.json]   # 需在终端输入 yes
+video-canvas-cli canvas import export.json                               # 需在终端输入 yes
 video-canvas-cli canvas export <code> -o export.json
 video-canvas-cli canvas graph <code> -o graph.json      # 只取 payload_json
 video-canvas-cli canvas save <code> --payload graph.json [--revision N]
@@ -83,6 +83,8 @@ video-canvas-cli canvas node rm <code> <节点id>
 - 能建的种类只有 `script` / `image` / `video` / `audio`；角色卡、分镜表、成片、导演台要在画面上建。
 - 文本节点的正文用 `--text`（服务端写进节点正文），其它节点的提示词用 `--prompt`。
 - `rm` 会连带清理连线、分镜里的挂接、成片顺序，由服务端统一处理。
+- `canvas create` / `canvas import` 同样要确认：它们会在账号下**新建**画布，而 CLI 没有删画布的命令，
+  无人确认时批量新建只会留下一堆没人认领的项目。
 - 流程是「读当前图 → 逐行列出要改什么 → 等你输入 yes → 带同一个 revision 提交」。
   确认期间画布被别人改了，服务端返回 409，不会覆盖你没看过的版本。
 - **没有 `--yes` 之类的旁路，也不能和 `--json` 一起用**：脚本无法在无人确认时做节点级修改。
@@ -166,7 +168,7 @@ video-canvas-cli trace compare --by harness_key --since 30d
 
 - 默认人类可读；加 `--json` 输出 `{"ok":true,"data":...}`，失败输出 `{"ok":false,"error":{"code":...,"message":...}}`。
 - 退出码：`0` 成功，`1` 业务/网络错误或任务失败，`2` 用法错误，`3` `--wait` / `task wait` 等待超时
-  （任务仍在跑，不是失败），`4` 节点级修改被取消。
+  （任务仍在跑，不是失败），`4` 新建项目或节点级修改被取消。
 
 ## 权限边界
 
