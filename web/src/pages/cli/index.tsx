@@ -11,7 +11,6 @@ import {
 import { CopyButton } from "@/components/admin-ui/copy-button";
 import { DataPage } from "@/components/admin-ui/data-panel";
 import { GLASS_PANEL } from "@/components/admin-ui/glass";
-import { Notice } from "@/components/admin-ui/notice";
 import {
   PageHeader,
   PageHeaderActions,
@@ -54,18 +53,37 @@ vc login --base ${apiBase}
 # 站点地址随凭据一起保存，之后不用再带 --base
 vc whoami`;
 
-  const basics = `vc canvas list                        # 我名下的画布
-vc canvas get <画布编号>               # 画布详情（含节点与连线）
-vc canvas create --title "新项目"      # 建一张空画布，返回画布编号
-vc canvas export <画布编号> -o 画布.json
-vc canvas import 画布.json             # 从导出文件建一张新画布
-vc canvas save <画布编号> --payload 画布.json --revision 3`;
+  const basics = `# 项目：找到 / 看结构 / 新建（新建需在终端输入 yes）
+vc canvas list
+vc canvas get <画布编号>
+vc canvas graph <画布编号> -o 画布.json
+vc canvas create --title "新项目"
+
+# 素材：看模型与余额，提交生成并等结果
+vc model list --kind image
+vc credits
+vc generate image --model <模型key> --prompt "…" --canvas <画布编号> --node <节点id> --wait
+
+# 画布：改节点（需确认）/ 整图写回
+vc canvas node add <画布编号> --kind script --label "旁白" --text "第一句"
+vc canvas save <画布编号> --payload 画布.json --revision 3
+
+# 成片：按连线顺序拼片
+vc canvas compose <画布编号> --node <成片节点id> --wait`;
 
   const tasks = `vc task get <任务ID>                  # 查一次生成任务
-vc task wait <任务ID> --timeout 600   # 阻塞到出结果，超时退出码 1`;
+vc task wait <任务ID> --timeout 600   # 阻塞到出结果；超时是退出码 3，任务仍在跑
+vc canvas compose-status <画布编号> --node <成片节点id>`;
 
   const scripting = `vc canvas list --json    # 一行 JSON：{ok,data} / {ok:false,error}
-# 退出码：0 成功 · 1 业务或网络错误 · 2 用法错误`;
+# 退出码：0 成功 · 1 业务或网络错误 · 2 用法错误 · 3 等待超时 · 4 确认被取消`;
+
+  // 技能跟着安装包走，路径带版本号，用通配符找
+  const skill = `# 技能就装在命令行目录下
+ls -d ~/.local/share/video-canvas-cli/*/skill
+
+# 拷进你用的助手的技能目录（Claude Code / Codex / WorkBuddy 等），放一处即可
+mkdir -p ~/.claude/skills && cp -R ~/.local/share/video-canvas-cli/*/skill ~/.claude/skills/video-canvas-cli`;
 
   return (
     <DataPage>
@@ -78,8 +96,8 @@ vc task wait <任务ID> --timeout 600   # 阻塞到出结果，超时退出码 1
             </Badge>
           </PageHeaderTitle>
           <p className="text-muted-foreground mt-1 max-w-3xl text-sm">
-            在终端或脚本里读写自己的画布、等生成结果、导运行记录。 与 MCP 接入互不相干： CLI
-            不签发也用不到 MCP 令牌。
+            在终端或脚本里读写你名下的画布：登录、生成、合成、导出。凭据是你自己的登录态，不涉及 MCP
+            令牌。
           </p>
           <p className="text-muted-foreground mt-1 max-w-3xl text-xs">
             当前是 <strong>beta</strong>{" "}
@@ -96,42 +114,11 @@ vc task wait <任务ID> --timeout 600   # 阻塞到出结果，超时退出码 1
         </PageHeaderActions>
       </PageHeader>
 
-      <Notice tone="info" title="CLI 和 MCP 是两条独立的路" className="mb-4">
-        MCP 是让 <strong>AI 工具</strong>（Claude、Cursor 等）直接操作画布的协议，靠项目令牌授权；
-        CLI 是给 <strong>人或者脚本</strong>
-        用的，登录时在网页上确认一次用户码，换到的是你自己的登录态。 两者能做的事都限于
-        <strong>你名下</strong>的画布，只是调用方不同——不需要为了用 CLI 去建 MCP 项目。
-      </Notice>
-
-      <Panel title="与 MCP 接入的区别" className="mb-4">
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[520px] text-sm">
-            <thead>
-              <tr className="text-muted-foreground border-chrome-border border-b text-left text-xs">
-                <th className="w-24 pb-2 font-normal">对比项</th>
-                <th className="pb-2 font-normal">MCP 接入</th>
-                <th className="pb-2 font-normal">命令行（CLI）</th>
-              </tr>
-            </thead>
-            <tbody className="divide-chrome-border divide-y">
-              <Row label="谁在用" mcp="AI 工具" cli="人和脚本" />
-              <Row label="凭据" mcp="项目令牌 vcm_…，有有效期" cli="设备授权换来的登录态，存本机" />
-              <Row
-                label="怎么授权"
-                mcp="在 MCP 接入页签发令牌"
-                cli="执行 vc login，网页上确认用户码"
-              />
-              <Row label="失效方式" mcp="停用项目或注销令牌" cli="登出、改密码或登录态过期" />
-            </tbody>
-          </table>
-        </div>
-      </Panel>
-
       <Panel title="安装" className="mb-4">
         <p className="text-muted-foreground text-xs">
           命令行单独发版，版本号与站点版本无关
           {release.version ? `：当前 ${release.version}` : ""}。 它<strong>没有发布到 npm</strong>
-          ，安装包由本站提供；按系统选一条执行即可（需要 Node 18 及以上，脚本会先检查）。
+          ，安装包由本站提供；按系统选一条执行即可（需要 Node 22.18 及以上，脚本会先检查）。
         </p>
         <CopyBlock>
           <CopyBlockHeader>
@@ -160,6 +147,21 @@ vc task wait <任务ID> --timeout 600   # 阻塞到出结果，超时退出码 1
           <code>~/.local/share/video-canvas-cli</code>（Windows 是{" "}
           <code>%LOCALAPPDATA%\video-canvas-cli</code>）与 PATH 里的两个链接即可。
         </p>
+      </Panel>
+
+      <Panel title="配套技能" className="mb-4">
+        <p className="text-muted-foreground text-xs">
+          安装包里带一份技能手册：告诉终端里的 AI 助手（Claude Code、Codex、WorkBuddy
+          等）什么时候该用 <code>vc</code>、模型与参数怎么查、节点 id 怎么挑、哪些操作要人确认。
+          它不参与 <code>vc</code> 运行，只是给助手看的说明，装完就在安装目录下。
+        </p>
+        <CopyBlock>
+          <CopyBlockHeader>
+            <CopyBlockTitle>把技能交给你的助手</CopyBlockTitle>
+            <CopyButton text={skill} />
+          </CopyBlockHeader>
+          <CopyBlockCode>{skill}</CopyBlockCode>
+        </CopyBlock>
       </Panel>
 
       <Panel title="登录" className="mb-4">
@@ -268,17 +270,4 @@ function useCLIRelease(apiBase: string): { version: string | null } {
     };
   }, [apiBase]);
   return { version };
-}
-
-/** 对比表的一行。 */
-function Row({ label, mcp, cli }: { label: string; mcp: ReactNode; cli: ReactNode }) {
-  return (
-    <tr>
-      <th className="text-muted-foreground py-2 pr-4 text-left align-top text-xs font-normal">
-        {label}
-      </th>
-      <td className="py-2 pr-4 align-top">{mcp}</td>
-      <td className="py-2 align-top">{cli}</td>
-    </tr>
-  );
 }
