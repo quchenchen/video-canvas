@@ -11,7 +11,10 @@ const bin = path.join(here, "..", "bin", "vc.mjs");
 const pkg = JSON.parse(readFileSync(path.join(here, "..", "package.json"), "utf8"));
 
 const run = (...args) =>
-  execFileSync(process.execPath, [bin, ...args], { encoding: "utf8", env: { ...process.env, VC_NO_UPDATE_CHECK: "1" } }).trim();
+  execFileSync(process.execPath, [bin, ...args], {
+    encoding: "utf8",
+    env: { ...process.env, VC_NO_UPDATE_CHECK: "1" },
+  }).trim();
 
 test("--version 打印 package.json 里的版本并带 beta 标记", () => {
   assert.equal(run("--version"), `video-canvas-cli ${pkg.version} (beta)`);

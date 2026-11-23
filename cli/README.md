@@ -34,6 +34,7 @@ video-canvas-cli login --base https://你的站点
 3. 命令行拿到 JWT，存到 `~/.config/video-canvas/credentials.json`（目录 `0700`、文件 `0600`）。
 
 `--base` 只给站点根即可，会自动补 `/api/v1`；也可以写进环境变量 `VC_API_BASE`。
+**必须带 `http://` 或 `https://`**——只写域名会直接报错，不做猜测补全。
 
 ```bash
 video-canvas-cli whoami     # 验证令牌是否仍然有效
@@ -54,16 +55,27 @@ video-canvas-cli canvas graph <code> -o graph.json      # 只取 payload_json
 video-canvas-cli canvas save <code> --payload graph.json [--revision N]
 ```
 
+`-o` 与 `--output` 等价；`-o -` 把内容写到 stdout（此时不能再加 `--json`）。
+
+**`graph` 和 `export` 不是一回事**：`graph` 输出 `{nodes, edges, viewport}`，是 `save` / `create --payload`
+要的形态；`export` 输出带 `format` / `canvas` / `assets` 的导出文档，只能喂给 `import`。
+把导出文档喂给 `save` 会被拒绝（早期版本会整份写进画布，把结构弄坏）。
+
+`export` 不给 `-o` 时默认写当前目录的 `canvas-<编号>.json`，在项目目录里跑记得显式指定。
+
 `canvas save` 走整图保存 + `revision` 乐观锁：不给 `--revision` 就先读一次当前版本。节点级增量操作请用 Agent 会话或平台桥的 `canvas_apply_ops`，CLI 这一层刻意不复制那套语义。
 
 ## 生成任务
 
 ```bash
 video-canvas-cli task get <id|task_ref>
-video-canvas-cli task wait <id|task_ref> --timeout 900
+video-canvas-cli task wait <id|task_ref> [--timeout 600] [--interval 3]
 ```
 
-`task wait` 只在终端打印状态变化，最终结果走 stdout；`--json` 时 stdout 只有一行 JSON，可直接接管道。
+`task wait` 默认 600 秒超时、3 秒轮询；只在终端打印状态变化，最终结果走 stdout；`--json` 时 stdout 只有一行 JSON，可直接接管道。
+
+- 任务**失败**终态：`ok:false` + 退出码 1。
+- **等待超时**：退出码 3，任务可能还在跑，用 `task get` 继续查。别把超时当失败重跑，会白烧积分。
 
 ## 运行记录
 
@@ -75,13 +87,19 @@ video-canvas-cli trace show <run_id>
 video-canvas-cli trace compare --by harness_key --since 30d
 ```
 
+**独立安装包不含这个脚本**。不在仓库里跑时，用 `--script <路径>` 或环境变量 `VC_AGENT_TRACE` 指定，
+否则会明确报「独立安装包不包含运行记录脚本」。
+
 拉下来的记录在 `.traces/`，**已在 `.gitignore` 里，不要提交**，也不要贴到 issue 或外部服务。
 
 ## 输出与退出码
 
 - 默认人类可读；加 `--json` 输出 `{"ok":true,"data":...}`，失败输出 `{"ok":false,"error":{"code":...,"message":...}}`。
-- 退出码：`0` 成功，`1` 业务或网络错误，`2` 用法错误。
+- 退出码：`0` 成功，`1` 业务/网络错误或任务失败，`2` 用法错误，`3` `task wait` 等待超时。
 
 ## 权限边界
 
 CLI 用的令牌等同网页登录的权限：能访问该用户自己的画布、素材、生成任务与积分。管理员命令（渠道、模型、用户管理）没有封装进这一版，避免一个脚本令牌顺手改掉平台配置。
+
+**这一版不生产素材**：没有生成图片/视频、没有合成成片、没有删除画布。生成与合成走画布界面或平台接口，
+CLI 只负责画布读写与盯着任务跑完。细节见站点 `/cli/docs` 的「边界与限制」。
