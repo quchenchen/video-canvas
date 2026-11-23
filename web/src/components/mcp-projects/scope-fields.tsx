@@ -30,9 +30,7 @@ export function ScopeChecklist({
     <div className="grid gap-4">
       {MCP_SCOPE_GROUPS.map((group) => (
         <fieldset key={group.key}>
-          <legend className="text-muted-foreground mb-2 text-xs">
-            {group.label}能力
-          </legend>
+          <legend className="text-muted-foreground mb-2 text-xs">{group.label}能力</legend>
           <div className="grid gap-3 sm:grid-cols-2">
             {MCP_SCOPES.filter((scope) => scope.group === group.key).map((scope) => (
               <label key={scope.value} className="flex items-start gap-2 text-sm">

@@ -1,6 +1,6 @@
 import type { FormEvent } from "react";
 import { useState } from "react";
-import { Cable, KeyRound, Plus, Terminal } from "lucide-react";
+import { Cable, KeyRound, Plus } from "lucide-react";
 
 import type { MCPProjectItem, MCPTokenItem } from "@/api/admin/mcp-project/type";
 import { confirm } from "@/components/admin-ui/confirm-dialog";
@@ -379,84 +379,8 @@ export function MCPProjectsView({
 
       {selected && <TokenPanel state={state} project={selected} now={now} />}
 
-      <CLISetupPanel />
-
       {target && <ProjectDialog target={target} state={state} onClose={() => setTarget(null)} />}
     </DataPage>
-  );
-}
-
-/**
- * 命令行（CLI）：与 MCP 并列的第二种接入方式，但它不是 MCP 的替代品。
- *
- * MCP 是给「AI 工具」用的长期令牌，令牌代表用户授权；CLI 是给「人和脚本」用的，
- * 走设备码登录换一枚自己的登录态，不经过令牌、也不消耗令牌有效期。
- * 两者共用同一套画布与生成能力，区别只在「谁来调」。
- */
-function CLISetupPanel() {
-  const origin = typeof window === "undefined" ? "" : window.location.origin.replace(/\/$/, "");
-  const install = `# 在连镜仓库根目录执行（一次性）
-npm i -g ./cli
-
-# 不想全局安装，就直接跑
-node ./cli/bin/vc.mjs --help`;
-  const login = `# 打印一个用户码并自动打开浏览器确认
-vc login --base ${origin}
-
-# 确认后本地留存登录态，之后不用再带 --base
-vc whoami`;
-  const basics = `vc canvas list                  # 我的画布
-vc canvas get <画布编号>         # 画布详情
-vc canvas export <画布编号> -o 画布.json
-vc task get <任务ID>             # 生成任务状态
-vc task wait <任务ID>            # 阻塞到出结果
-vc trace pull --since 7d         # 拉取线上 Agent 运行记录`;
-  const scripting = `vc canvas list --json            # 一行 JSON：{ok,data} / {ok:false,error}
-# 退出码：0 成功，1 业务或网络错误，2 用法错误`;
-  return (
-    <section className={`${PANEL} grid gap-3`} data-slot="cli-setup">
-      <h2 className="flex items-center gap-2 text-sm font-semibold">
-        <Terminal className="size-4" aria-hidden="true" /> 命令行（CLI）
-      </h2>
-      <p className="text-muted-foreground text-xs">
-        独立于 MCP 的接入方式：MCP 令牌是发给<strong>AI 工具</strong>的，CLI 是给
-        <strong>人或者脚本</strong>直接用的。CLI 不走令牌，登录时打开浏览器确认一次，
-        换的是你自己的登录态，存在本机 <code>~/.config/video-canvas/</code>
-        （目录 0700、文件 0600）。 两者能做的事一样：读写自己名下的画布、查生成任务、导运行记录。
-      </p>
-      <CopyBlock>
-        <CopyBlockHeader>
-          <CopyBlockTitle>安装（需要 Node 18+）</CopyBlockTitle>
-          <CopyButton text={install} />
-        </CopyBlockHeader>
-        <CopyBlockCode>{install}</CopyBlockCode>
-      </CopyBlock>
-      <CopyBlock>
-        <CopyBlockHeader>
-          <CopyBlockTitle>登录（当前站点 {origin}）</CopyBlockTitle>
-          <CopyButton text={login} />
-        </CopyBlockHeader>
-        <CopyBlockCode>{login}</CopyBlockCode>
-      </CopyBlock>
-      <CopyBlock>
-        <CopyBlockHeader>
-          <CopyBlockTitle>常用命令</CopyBlockTitle>
-          <CopyButton text={basics} />
-        </CopyBlockHeader>
-        <CopyBlockCode>{basics}</CopyBlockCode>
-      </CopyBlock>
-      <CopyBlock>
-        <CopyBlockHeader>
-          <CopyBlockTitle>脚本与 Agent 调用</CopyBlockTitle>
-          <CopyButton text={scripting} />
-        </CopyBlockHeader>
-        <CopyBlockCode>{scripting}</CopyBlockCode>
-      </CopyBlock>
-      <p className="text-muted-foreground text-xs">
-        CLI 目前随仓库分发，没有发布到 npm；换机器就把仓库带过去重装一次。 登录态过期或用{" "}
-        <code>vc logout</code> 后重新 <code>vc login</code> 即可。
-      </p>
-    </section>
   );
 }
 

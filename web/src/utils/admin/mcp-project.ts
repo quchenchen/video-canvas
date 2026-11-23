@@ -23,7 +23,12 @@ export const MCP_SCOPES = [
     label: "读画布",
     hint: "读节点与连线结构；改画布前必须先有它",
   },
-  { value: "canvas:media", group: "canvas", label: "查看素材", hint: "看图片、看视频、从视频抓一帧" },
+  {
+    value: "canvas:media",
+    group: "canvas",
+    label: "查看素材",
+    hint: "看图片、看视频、从视频抓一帧",
+  },
   { value: "canvas:write", group: "canvas", label: "改画布", hint: "改节点属性与生成提示词" },
   { value: "canvas:layout", group: "canvas", label: "重排布局", hint: "移动节点、整理分组与顺序" },
   {
