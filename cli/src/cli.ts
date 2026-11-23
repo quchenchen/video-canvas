@@ -79,10 +79,11 @@ const USAGE = `video-canvas-cli（beta）— 连镜命令行
   model show <模型key>                            看这个模型的参数（--param 能填什么）与参考素材上限
   credits                                         余额 / 冻结 / 可用积分
 
-生成（提交后产物由画布回填到节点）
+生成（提交后产物由服务端写回节点，无需打开画布）
   generate image|video|audio|text --model <模型key> [--canvas <画布编号> --node <节点id>]
             [--prompt 提示词] [--param 名=值]... [--input '<json>'|@文件|-]
             [--ref-image 素材id]... [--ref-video 素材id]... [--ref-audio 素材id]...
+            [--first-frame 素材id [--last-frame 素材id]]   锁首帧 / 首尾帧（视频）
             [--count 1] [--wait] [--timeout 600] [--interval 3]
 
 合成成片

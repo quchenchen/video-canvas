@@ -1182,32 +1182,101 @@ function buildGenerateInput(flags: Flags, usage: string): Record<string, unknown
       return id;
     });
   }
+  applyFrameFlags(flags, input, usage);
   return input;
 }
 
+/**
+ * --first-frame / --last-frame：直接锁首尾帧。
+ * 模型按「第一张图 = 首帧、第二张 = 尾帧」取值，所以尾帧不能单独给——单独给会顶到首帧位置上。
+ */
+function applyFrameFlags(flags: Flags, input: Record<string, unknown>, usage: string): void {
+  const first = flags["first-frame"];
+  const last = flags["last-frame"];
+  if (first === undefined && last === undefined) return;
+  const pick = (value: FlagValue | undefined, name: string): string => {
+    if (value === undefined) return "";
+    if (value === true || typeof value !== "string")
+      throw new APIError(-1, `--${name} 需要素材 id。用法：${usage}`, 2);
+    if (!/^\d+$/.test(value))
+      throw new APIError(-1, `--${name} 要素材 id（纯数字），收到「${value}」`, 2);
+    return value;
+  };
+  const head = pick(first, "first-frame");
+  const tail = pick(last, "last-frame");
+  if (!head)
+    throw new APIError(
+      -1,
+      "--last-frame 要跟 --first-frame 一起给：模型把第一张图当首帧，只给尾帧会顶到首帧位置上",
+      2,
+    );
+  const existing = Array.isArray(input.images) ? (input.images as string[]) : [];
+  if (existing.length)
+    throw new APIError(
+      -1,
+      "首尾帧与 --ref-image 不要混用：用 --first-frame/--last-frame 就够了",
+      2,
+    );
+  input.images = tail ? [head, tail] : [head];
+  if (input.mode === undefined) input.mode = "keyframe";
+}
+
+/** 这次提交里的参考图到底起什么作用，说清楚，别让人以为锁了首帧其实没有。 */
+function describeRefInput(input: Record<string, unknown>): string {
+  const images = Array.isArray(input.images) ? (input.images as unknown[]).map(String) : [];
+  if (!images.length) return "";
+  const mode = typeof input.mode === "string" ? input.mode : "";
+  const op = typeof input.op === "string" ? input.op : "";
+  if (mode === "keyframe" || op === "i2v")
+    return images.length > 1
+      ? `参考图：首帧 ${images[0]} / 尾帧 ${images[1]}（keyframe，锁帧）`
+      : `参考图：首帧 ${images[0]}（keyframe，锁帧）`;
+  return (
+    `参考图 ${images.length} 张，按「参考生成」使用：影响风格与内容，但不锁首帧。` +
+    "要锁首尾帧改用 --first-frame <首帧id> --last-frame <尾帧id>"
+  );
+}
+
 /** 提交后等任务到终态；超时抛退出码 3，与 task wait 一致。 */
+/** 人类可读的已等时长：75s / 3m20s。 */
+function formatElapsed(ms: number): string {
+  const total = Math.floor(ms / 1000);
+  const m = Math.floor(total / 60);
+  return m > 0 ? `${m}m${String(total % 60).padStart(2, "0")}s` : `${total}s`;
+}
+
 async function waitTaskTerminal(
   ctx: Ctx,
   id: string,
   opts: { timeoutSeconds: number; intervalSeconds: number },
 ): Promise<Task> {
   const { timeoutSeconds, intervalSeconds } = opts;
-  const deadline = Date.now() + timeoutSeconds * 1000;
+  const startedAt = Date.now();
+  const deadline = startedAt + timeoutSeconds * 1000;
   let last = "";
+  let lastAt = 0;
   while (Date.now() < deadline) {
     const task = await fetchTask(ctx, id);
-    if (task.status !== last) {
-      const progress =
-        task.progress === null || task.progress === undefined ? "" : ` ${task.progress}%`;
-      ctx.stderr(`[${new Date().toISOString().slice(11, 19)}] ${id} ${task.status}${progress}`);
-      last = task.status;
+    const progress =
+      task.progress === null || task.progress === undefined ? "" : ` ${task.progress}%`;
+    const line = `${id} ${task.status}${progress}`;
+    const now = Date.now();
+    // 状态或进度变了就刷一行；一直没变化也每 30 秒报一次心跳，
+    // 否则视频这种跑几分钟的任务，屏幕上什么都没有，看起来像卡死。
+    if (line !== last || now - lastAt >= 30000) {
+      ctx.stderr(
+        `[${new Date().toISOString().slice(11, 19)}] ${line}  已等 ${formatElapsed(now - startedAt)}`,
+      );
+      last = line;
+      lastAt = now;
     }
     if (TERMINAL_TASK_STATUSES.has(task.status)) return task;
     await sleep(intervalSeconds * 1000);
   }
   throw new APIError(
     -1,
-    `等待超时（${timeoutSeconds}s），任务 ${id} 仍未结束；可用 task get ${id} 继续查`,
+    `等待超时（${formatElapsed(timeoutSeconds * 1000)}），任务 ${id} 仍在跑（不是失败）；` +
+      `用 task get ${id} 接着查，或 task wait ${id} 再等`,
     0,
     3,
   );
@@ -1236,7 +1305,8 @@ export async function generate(ctx: Ctx, args: Args): Promise<void> {
   const usage =
     "generate <image|video|audio|text> --model <模型key> " +
     "[--canvas <画布编号> --node <节点id>] [--prompt <提示词>] [--param 名=值]... " +
-    "[--input '<json>'|@文件|-] [--ref-image <素材id>]... [--count 1] [--wait] [--timeout 600] [--interval 3]";
+    "[--input '<json>'|@文件|-] [--ref-image <素材id>]... " +
+    "[--first-frame <素材id> [--last-frame <素材id>]] [--count 1] [--wait] [--timeout 600] [--interval 3]";
   if (!kind || !GENERATE_KINDS.has(kind))
     throw new APIError(
       -1,
@@ -1274,6 +1344,9 @@ export async function generate(ctx: Ctx, args: Args): Promise<void> {
   }
 
   const token = requireToken(ctx);
+  // 先把参考图的语义说清楚：给了图不等于锁了首帧，模式不对会白跑一段。
+  const refNote = describeRefInput(input);
+  if (refNote) ctx.stderr(refNote);
   const idempotencyKey =
     typeof args.flags["idempotency-key"] === "string"
       ? args.flags["idempotency-key"]
@@ -1292,9 +1365,12 @@ export async function generate(ctx: Ctx, args: Args): Promise<void> {
   const failures = items.filter((item) => item.error);
   if (!tasks.length) {
     const first = failures[0]?.error;
+    const reason = first ? `${first.status} ${first.message}` : "服务端没有返回任务";
+    // 上游满载 / 限流是等着就能过的，跟参数写错不是一回事，别让人以为要改命令
+    const retryable = /队列已满|速率限制|繁忙|busy|rate.?limit|超时|timeout/i.test(reason);
     throw new APIError(
       first?.code ?? -1,
-      `提交失败：${first ? `${first.status} ${first.message}` : "服务端没有返回任务"}`,
+      `提交失败：${reason}${retryable ? "（上游繁忙，等一会儿重投即可，命令不用改）" : ""}`,
       0,
     );
   }
@@ -1306,7 +1382,7 @@ export async function generate(ctx: Ctx, args: Args): Promise<void> {
       [
         formatSubmittedItems(items),
         "",
-        "任务已提交，产物会在打开画布时回填到节点；要在这里等，加 --wait。",
+        "任务已提交；完成后产物由服务端写回节点，不需要打开画布。看进度：task get <id>；要在这里等：加 --wait。",
       ].join("\n"),
     );
     return;
