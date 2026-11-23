@@ -131,7 +131,11 @@ const imageModels = (...keys: string[]) =>
     models: keys.map((key) => ({ key, label: key, vendor: "x" })),
   }) as never;
 
-beforeEach(() => {
+beforeEach(async () => {
+  // 每个用例换一份新的 jsdom：同一份 document 反复挂载整张分镜表，jsdom / cssstyle 的内存会逐次累积
+  dom.restore();
+  Bun.gc(true);
+  dom = await installDom();
   upload = async () => ({ id: "1", url: "/f/1.png" });
   uploadCalls = 0;
   seen.nodes = [];

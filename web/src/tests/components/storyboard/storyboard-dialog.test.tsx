@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, spyOn, test } from "bun:test";
+import { afterAll, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { useEffect } from "react";
 
 import type { CanvasNode, StoryboardShot } from "@/types";
@@ -60,6 +60,15 @@ beforeAll(async () => {
       <Body />
     </ReactFlowProvider>
   );
+});
+/**
+ * 每个用例换一份新的 jsdom。同一份 document 反复挂载 50 镜的表格，jsdom / cssstyle 的内存会逐次累积
+ * （实测每挂载一次涨十几 MB），跑到后面的用例就会 Out of memory，报错还会串到别的用例上。
+ */
+beforeEach(async () => {
+  dom.restore();
+  Bun.gc(true);
+  dom = await installDom();
 });
 afterAll(() => dom.restore());
 
