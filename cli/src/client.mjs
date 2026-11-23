@@ -51,9 +51,10 @@ export async function request({
   path,
   body,
   query,
+  headers: extra = {},
   fetchImpl = fetch,
 }) {
-  const headers = { Accept: "application/json" };
+  const headers = { Accept: "application/json", ...extra };
   if (token) headers.Authorization = `Bearer ${token}`;
   if (body !== undefined) headers["Content-Type"] = "application/json";
 
