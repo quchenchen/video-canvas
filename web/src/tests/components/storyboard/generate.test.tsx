@@ -1,6 +1,7 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, mock, test } from "bun:test";
 import { useEffect } from "react";
 
+import * as assetApi from "@/api/asset";
 import type {
   NodeActions,
   registerNodeActions as RegisterNodeActions,
@@ -22,7 +23,9 @@ type UploadFn = (
 ) => Promise<{ id: string; url: string }>;
 let upload: UploadFn = async () => ({ id: "1", url: "/f/1.png" });
 let uploadCalls = 0;
+// 只换上传动作，其余导出原样留着：mock 少给一个导出，别的模块 import 进来就是模块加载失败
 mock.module("@/api/asset", () => ({
+  ...assetApi,
   uploadAsset: (file: File, options?: { onProgress?: (percent: number) => void }) => {
     uploadCalls += 1;
     return upload(file, options);
@@ -128,7 +131,11 @@ const imageModels = (...keys: string[]) =>
     models: keys.map((key) => ({ key, label: key, vendor: "x" })),
   }) as never;
 
-beforeEach(() => {
+beforeEach(async () => {
+  // 每个用例换一份新的 jsdom：同一份 document 反复挂载整张分镜表，jsdom / cssstyle 的内存会逐次累积
+  dom.restore();
+  Bun.gc(true);
+  dom = await installDom();
   upload = async () => ({ id: "1", url: "/f/1.png" });
   uploadCalls = 0;
   seen.nodes = [];
