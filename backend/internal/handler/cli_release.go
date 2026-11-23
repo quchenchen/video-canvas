@@ -18,11 +18,21 @@ import (
 // 这几个接口不需要登录：装 CLI 的人此时还没有凭据，而包体里也没有任何站点私有内容。
 type CLIReleaseHandler struct {
 	svc *service.CLIReleaseService
+	// publicURL 是配置里写死的站点根地址；非空时优先，避免 TLS 终止在代理层时拼出 http://
+	publicURL string
 }
 
-// NewCLIReleaseHandler 注入发行服务（cli 目录的定位与打包都在服务层）。
-func NewCLIReleaseHandler(svc *service.CLIReleaseService) *CLIReleaseHandler {
-	return &CLIReleaseHandler{svc: svc}
+// NewCLIReleaseHandler 注入发行服务与站点根地址（publicURL 可为空）。
+func NewCLIReleaseHandler(svc *service.CLIReleaseService, publicURL string) *CLIReleaseHandler {
+	return &CLIReleaseHandler{svc: svc, publicURL: strings.TrimRight(publicURL, "/")}
+}
+
+// origin 返回写进脚本与下载链接的站点根地址：配置优先，没配才按请求头推导。
+func (h *CLIReleaseHandler) origin(c *gin.Context) string {
+	if h.publicURL != "" {
+		return h.publicURL
+	}
+	return requestOrigin(c)
 }
 
 // Release 返回 CLI 的独立版本、Node 要求、各平台包指纹，以及可直接粘的安装命令。
@@ -33,7 +43,7 @@ func (h *CLIReleaseHandler) Release(c *gin.Context) {
 		failCLIRelease(c, err)
 		return
 	}
-	base := requestOrigin(c)
+	base := h.origin(c)
 	files := make([]gin.H, 0, len(rel.Files))
 	for _, file := range rel.Files {
 		files = append(files, gin.H{
@@ -92,7 +102,7 @@ func (h *CLIReleaseHandler) InstallScript(c *gin.Context) {
 	}
 	// 脚本是纯文本、不是 JSON 信封：c.Data 直接下发字节，别走 response 包
 	c.Header("Cache-Control", "public, max-age=60")
-	c.Data(http.StatusOK, "text/plain; charset=utf-8", []byte(service.CLIInstallScript(osName, requestOrigin(c))))
+	c.Data(http.StatusOK, "text/plain; charset=utf-8", []byte(service.CLIInstallScript(osName, h.origin(c))))
 }
 
 // failCLIRelease 把服务层错误映射成对外错误码：

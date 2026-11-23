@@ -373,7 +373,7 @@ func NewApp(cfg *config.Config) (*App, error) {
 		Health:          handler.NewHealthHandler(db, rdb),
 		User:            handler.NewUserHandler(userSvc),
 		CLIDevice:       handler.NewCLIDeviceHandler(cliDeviceSvc),
-		CLIRelease:      handler.NewCLIReleaseHandler(cliReleaseSvc),
+		CLIRelease:      handler.NewCLIReleaseHandler(cliReleaseSvc, cfg.Server.PublicURL),
 		Me:              handler.NewMeHandler(meSvc),
 		CanvasProject:   handler.NewCanvasProjectHandler(canvasProjectSvc),
 		Drama:           handler.NewDramaHandler(dramaSvc),

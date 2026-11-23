@@ -10,6 +10,9 @@ server:
   allowed_origins: # WebSocket 升级允许的 Origin 白名单；为空只允许同源
     - http://localhost:5173
     - http://127.0.0.1:5173
+  # 站点对外根地址（如 https://example.com）。命令行安装脚本与下载链接用它拼地址；为空时按请求头推导。
+  # TLS 终止在反向代理/隧道那一层又没传 X-Forwarded-Proto 时，这里必须写，否则拼出来的是 http://。
+  public_url: ""
 
 log:
   level: debug # debug | info | warn | error
