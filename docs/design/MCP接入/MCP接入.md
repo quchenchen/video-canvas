@@ -1,7 +1,7 @@
 # 画布 MCP 接入
 
 > - **范围**：给画布加一个对外的 MCP 端点，让 Codex / Claude Code / Cursor / WorkBuddy 这类外部 Agent 能直接读写画布、触发生成、打包素材；后台新增独立的「MCP 项目」配置，按项目签发令牌、绑定归属用户与权限范围。
-> - **日期和状态**：2026-11-22，**仅规划，未实现**。一期范围见第 12 节。
+> - **日期和状态**：2026-11-22 规划，2026-11-24 已实现，**对外标注 Beta**：工具集合与权限档位还会随反馈调整，接入方以页面生成的配置片段为准。一期范围见第 12 节。
 > - **证据约定**：**事实**附文件路径或行号；**推断**是基于事实的判断；**提案**是尚未实现的设计。
 > - **参考项目**：`/Users/quchenchen/Documents/github/agent-plugin`（ChatCut，Apache-2.0，已浅克隆）、`/Users/quchenchen/Documents/github/OpenCut` 与 `opencut-classic`（MIT，已浅克隆）。
 > - **不做什么**：不接 ChatCut 的托管服务（闭源、按 credits 计费、素材出境）；不引入 OpenCut 的浏览器渲染链路（见 3.3）。
@@ -172,6 +172,8 @@ CREATE INDEX idx_mcp_project_tokens_project ON mcp_project_tokens (project_id);
 **为什么不复用 `admin_api_tokens`**（事实支撑）：那张表的认证前提是「签发人必须是 admin / super_admin」（`service/agent/observe.go:377-383` 每次实时查角色），scope 也写死只有 `agent:read`。MCP 项目要绑**普通用户**、要多档 scope、要有「项目级启停」这一层，塞进去会直接破坏它现有的鉴权前提。分表、复用范式。
 
 ## 6. 鉴权（提案）
+
+> 实现时改了两处，本节保留当时的判断供对照：权限单位从「画布」改为「用户」（§15）；令牌明文改为可回看（库里存 AES-GCM 密文，§16）。下面的「只返回一次」以 §16 为准。
 
 - 明文格式 `vcm_` + 32 字节随机十六进制；库里只存 sha256；**明文只在创建响应里返回一次**。
 - 中间件 `RequireMCPToken`：按 `vcm_` 前缀分流（与 `analysis_token.go:31` 同一手法，互不干扰）→ 查 hash → 校验未注销 / 未过期 / 项目 `enabled` / 归属用户 `active` → 注入 `{ProjectID, UserID, Scopes}`。

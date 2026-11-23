@@ -22,6 +22,7 @@ import (
 	"video-canvas/internal/pkg/logger"
 	"video-canvas/internal/pkg/response"
 	agentsvc "video-canvas/internal/service/agent"
+	"video-canvas/pkg/version"
 )
 
 // SessionHeader 是 MCP 标准的会话标识头：一期只用于把同一个宿主的多次调用归到一条会话上，
@@ -160,7 +161,13 @@ func (s *Server) initialize(c *gin.Context, id *middleware.MCPIdentity, req rpcR
 	writeRPC(c, rpcResponse{JSONRPC: "2.0", ID: req.ID, Result: map[string]any{
 		"protocolVersion": pickProtocol(params.ProtocolVersion),
 		"capabilities":    map[string]any{"tools": map[string]any{"listChanged": false}},
-		"serverInfo":      map[string]any{"name": "video-canvas", "title": "画布 MCP 接入"},
+		// 标题带 Beta：工具名、权限档位还会随反馈调整，接入方别把它当稳定契约。
+		// version 用服务端构建版本，客户端只用来展示与排查。
+		"serverInfo": map[string]any{
+			"name":    "video-canvas",
+			"title":   "画布 MCP 接入（Beta）",
+			"version": version.Version,
+		},
 	}})
 }
 

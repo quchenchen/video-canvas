@@ -71,6 +71,8 @@ describe("后台导航", () => {
     const found = findNav("/admin/agent/mcp");
     expect(found?.group.label).toBe("AI 配置");
     expect(found?.item.label).toBe("MCP 接入");
+    // 功能还是 Beta，入口要一直带着这个标记，别在后续改动里被顺手删掉
+    expect(found?.item.badge).toBe("Beta");
     const items = ADMIN_NAV.flatMap((group) => group.items);
     expect(items.filter((item) => item.icon === found?.item.icon)).toHaveLength(1);
   });

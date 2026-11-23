@@ -44,7 +44,7 @@ export const ADMIN_NAV: AdminNavSection[] = [
       { to: "agent/skills", label: "技能", icon: Lightbulb },
       { to: "agent/runs", label: "运行记录", icon: History },
       { to: "agent/tokens", label: "分析令牌", icon: KeyRound },
-      { to: "agent/mcp", label: "MCP 接入", icon: Cable },
+      { to: "agent/mcp", label: "MCP 接入", badge: "Beta", icon: Cable },
     ],
   },
   {

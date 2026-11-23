@@ -342,8 +342,11 @@ export function MCPProjectsView({
   return (
     <DataPage>
       <PageHeader>
-        <PageHeaderHeading>
+        <PageHeaderHeading className="flex items-center gap-2">
           <PageHeaderTitle>{mode === "admin" ? "MCP 接入" : "我的 MCP 接入"}</PageHeaderTitle>
+          <Tag tone="warning" mono>
+            Beta
+          </Tag>
         </PageHeaderHeading>
         <PageHeaderActions>
           <Button onClick={() => setTarget({ kind: "new" })}>
@@ -354,6 +357,7 @@ export function MCPProjectsView({
       </PageHeader>
 
       <Notice tone="info" title="外部 AI 工具怎么连" className="mb-4">
+        这套能力还在 Beta：工具集合与权限档位会随反馈调整，接入方以本页生成的配置片段为准。
         新建一个项目、勾上要开放的能力 → 签发令牌 → 把下面的配置片段贴进工具。 令牌代表你把
         <strong>自己名下</strong>的画布授权给这个工具，能看和改的范围由权限档位决定，
         具体操作哪块画布由每次调用指定（没指定就用项目的默认画布）。
