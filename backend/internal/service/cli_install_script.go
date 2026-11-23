@@ -30,7 +30,7 @@ node -e 'process.exit(Number(process.versions.node.split(".")[0]) >= 18 ? 0 : 1)
 # 版本以服务端为准：脚本不写死版本，升级重跑同一条命令即可
 VERSION="${VC_VERSION:-}"
 if [ -z "$VERSION" ]; then
-  VERSION=$(curl -fsSL "$API/release" | node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{try{process.stdout.write(String(JSON.parse(s).version||""))}catch{}})')
+  VERSION=$(curl -fsSL "$API/release" | node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{try{process.stdout.write(String(JSON.parse(s).data.version||""))}catch{}})')
 fi
 [ -n "$VERSION" ] || die "取不到最新版本，请确认 $API/release 可以访问"
 
@@ -89,7 +89,7 @@ if ($LASTEXITCODE -ne 0) { Fail "Node.js 版本过低（当前 $(node -v)），�
 
 $Version = $env:VC_VERSION
 if (-not $Version) {
-  try { $Version = (Invoke-RestMethod -Uri "$Api/release" -UseBasicParsing).version }
+  try { $Version = (Invoke-RestMethod -Uri "$Api/release" -UseBasicParsing).data.version }
   catch { Fail "取不到最新版本，请确认 $Api/release 可以访问" }
 }
 if (-not $Version) { Fail '服务端没有返回版本号' }
