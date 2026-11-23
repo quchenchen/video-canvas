@@ -3,7 +3,7 @@
 给人和脚本用的命令行：设备码登录，不用把密码或长期令牌交给脚本；画布、模型与积分、生成任务、成片合成、短剧只读、
 运行记录都走已有的 HTTP 接口。
 
-零第三方依赖，Node 18+。装好后有两个等价的命令名：`vc` 与 `video-canvas-cli`。
+用 TypeScript 写、运行时零第三方依赖，需要 Node 18+。装好后有两个等价的命令名：`vc` 与 `video-canvas-cli`。
 
 > **beta 渠道**：相当一段时间内保持测试状态。命令名与参数会尽量稳定，但输出格式、提示语、
 > 新增子命令仍可能调整。每次运行会在后台查一次最新版本，有新版本时在 stderr 提示一行升级命令
@@ -106,7 +106,7 @@ CLI 覆盖「画布本身」「模型与积分」「提交生成」「合成成�
 ## 安装
 
 CLI 单独发版，版本号与站点版本**无关**。它没有发布到 npm，安装包由你自己的站点提供，
-需要 Node 18 及以上（脚本会先检查）。
+需要 Node 18 及以上（脚本会先检查）。安装包里是编译好的 JavaScript，**装的人不需要装 TypeScript、也不需要 `npm install`**——只有改源码的人需要。
 
 ### macOS / Linux
 
@@ -124,7 +124,7 @@ irm https://你的站点/api/v1/cli/install.ps1 | iex
 ```
 
 装到 `%LOCALAPPDATA%\video-canvas-cli\<版本>`：写入 `vc.cmd` / `video-canvas-cli.cmd` 转发到
-node，并把 bin 目录加进用户 PATH（重开终端生效）。
+`node`（入口是 `lib\dist\cli.js`），并把 bin 目录加进用户 PATH（重开终端生效）。
 
 ### 手动下载 / 离线
 
@@ -133,7 +133,7 @@ curl -fsSL https://你的站点/api/v1/cli/download?os=unix -o video-canvas-cli.
 curl -fsSL https://你的站点/api/v1/cli/download?os=windows -o video-canvas-cli.zip  # Windows
 ```
 
-包内就是 `package.json`、`bin/`、`src/`，解压后 `node <目录>/bin/vc.mjs` 直接能跑。
+包内就是 `package.json` 与 `dist/`（编译后的 JS），解压后 `node <目录>/dist/cli.js` 直接能跑。
 
 ### 可覆盖的参数
 
@@ -152,12 +152,13 @@ curl -fsSL https://你的站点/api/v1/cli/download?os=windows -o video-canvas-c
 ### 自检
 
 ```bash
-vc --version          # video-canvas-cli 0.3.3
+vc --version          # video-canvas-cli 0.4.0
 vc --version --json   # {"ok":true,"data":{...,"node":"v22.22.2","os":"darwin","arch":"x64"}}
 ```
 
 `cli/package.json` 的 `version` 是唯一来源：安装包名、`vc --version`、站点 `/cli` 页显示的版本
-都读它，不存在三处各写一个数。源码里也能直接跑：`node cli/bin/vc.mjs --help`。
+都读它，不存在三处各写一个数。源码是 TypeScript：仓库里 `cd cli && npm install && npm run build` 之后
+`node dist/cli.js --help` 就能跑；Node 22 也可以直接 `node src/cli.ts --help`（靠类型擦除，不产出文件）。
 
 ## 5 分钟上手
 

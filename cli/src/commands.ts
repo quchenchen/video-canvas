@@ -6,32 +6,72 @@ import path from "node:path";
 import readline from "node:readline/promises";
 import { fileURLToPath } from "node:url";
 
-import { APIError, normalizeBase, request, siteRootOf } from "./client.mjs";
-import { clearCredentials, saveCredentials } from "./config.mjs";
+import { APIError, errorMessage, normalizeBase, request, siteRootOf } from "./client.ts";
+import { clearCredentials, saveCredentials } from "./config.ts";
+import type {
+  Args,
+  Canvas,
+  CanvasNode,
+  CanvasNodeData,
+  ComposeActive,
+  ComposeJob,
+  ComposeRow,
+  Ctx,
+  DevicePoll,
+  DeviceStart,
+  DramaJob,
+  DramaSummary,
+  DramaUnit,
+  DramaView,
+  ExportResult,
+  FlagValue,
+  Flags,
+  GenerateItem,
+  GenerateResponse,
+  Graph,
+  ImportResult,
+  Me,
+  Model,
+  ModelParamField,
+  OpsResult,
+  Page,
+  Task,
+} from "./types.ts";
+
+/** JSON 解析出来的值：结构由调用方按用途断言，不在解析处假装知道形状。 */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type JSONValue = any;
 
 /** 任务的终态：到这些状态就不必再等。 */
-const TERMINAL_TASK_STATUSES = new Set(["succeeded", "failed", "canceled", "expired"]);
+const TERMINAL_TASK_STATUSES = new Set<string>(["succeeded", "failed", "canceled", "expired"]);
 
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
  * 短选项别名。只登记确实有文档承诺的那几个；其余 `-x` 原样留给 positional，
  * 这样 `trace` 透传给 agent-trace 的参数不会被 CLI 吞掉。
  */
-const SHORT_FLAGS = { o: "output" };
+const SHORT_FLAGS: Record<string, string> = { o: "output" };
 
 /**
  * 可以给多次的 flag：保留成列表，而不是后一个覆盖前一个。
  * 只登记「本来就是多值」的几个（生成参数、参考素材、成片素材、镜号），
  * 其余 flag 仍是「后出现者生效」——单值字段给两次是笔误，不该悄悄变成数组。
  */
-const MULTI_FLAGS = new Set(["param", "ref-image", "ref-video", "ref-audio", "assets", "seqs"]);
+const MULTI_FLAGS = new Set<string>([
+  "param",
+  "ref-image",
+  "ref-video",
+  "ref-audio",
+  "assets",
+  "seqs",
+]);
 
 /**
  * 下一个 token 是不是「另一个选项」而不是值。
  * 负数（`-1`）和单个 `-`（stdout 约定）都算值，否则 `--page-size -1`、`-o -` 无法表达。
  */
-function isOptionToken(token) {
+function isOptionToken(token: unknown): boolean {
   if (typeof token !== "string") return false;
   if (token === "-") return false;
   if (/^-\d/.test(token)) return false;
@@ -39,7 +79,7 @@ function isOptionToken(token) {
 }
 
 /** 取一个必需的字符串型 flag（如 --payload、--title）；无值时给出明确用法。 */
-export function stringFlag(flags, name, usage) {
+export function stringFlag(flags: Flags, name: string, usage: string): string {
   const value = flags[name];
   if (value === undefined) throw new APIError(-1, usage, 2);
   if (value === true || typeof value !== "string")
@@ -47,9 +87,15 @@ export function stringFlag(flags, name, usage) {
   return value;
 }
 
+export interface IntOptions {
+  min?: number;
+  max?: number;
+}
+
 /** 校验并转换一个整数值；非法值直接报用法错误，不静默退回默认值。 */
-export function toInt(raw, name, { min = 1, max = Number.MAX_SAFE_INTEGER } = {}) {
-  if (raw === true) throw new APIError(-1, `--${name} 需要一个数字`, 2);
+export function toInt(raw: FlagValue | number, name: string, options: IntOptions = {}): number {
+  const { min = 1, max = Number.MAX_SAFE_INTEGER } = options;
+  if (raw === true || Array.isArray(raw)) throw new APIError(-1, `--${name} 需要一个数字`, 2);
   const value = Number(raw);
   if (!Number.isInteger(value) || value < min || value > max)
     throw new APIError(-1, `--${name} 需要 ${min}–${max} 的整数，收到「${raw}」`, 2);
@@ -57,7 +103,25 @@ export function toInt(raw, name, { min = 1, max = Number.MAX_SAFE_INTEGER } = {}
 }
 
 /** 取一个整数型 flag；没给就用默认值。 */
-export function intFlag(flags, name, fallback, options) {
+export function intFlag(
+  flags: Flags,
+  name: string,
+  fallback: undefined,
+  options?: IntOptions,
+): number | undefined;
+export function intFlag(flags: Flags, name: string, fallback: number, options?: IntOptions): number;
+export function intFlag(
+  flags: Flags,
+  name: string,
+  fallback: number | undefined,
+  options?: IntOptions,
+): number | undefined;
+export function intFlag(
+  flags: Flags,
+  name: string,
+  fallback: number | undefined,
+  options?: IntOptions,
+): number | undefined {
   const raw = flags[name];
   return raw === undefined ? fallback : toInt(raw, name, options);
 }
@@ -66,10 +130,10 @@ export function intFlag(flags, name, fallback, options) {
  * 轻量参数解析：`--key value` / `--key=value` / `--flag` / `-o value`。
  * CLI 只有几个命令，不值得引入第三方解析器；语义固定，Agent 也容易生成。
  */
-export function parseArgs(argv) {
-  const positional = [];
-  const flags = {};
-  const setFlag = (name, value) => {
+export function parseArgs(argv: string[]): Args {
+  const positional: string[] = [];
+  const flags: Flags = {};
+  const setFlag = (name: string, value: string | true): void => {
     if (!MULTI_FLAGS.has(name)) {
       flags[name] = value;
       return;
@@ -80,7 +144,7 @@ export function parseArgs(argv) {
     else flags[name] = [prev, value];
   };
   for (let i = 0; i < argv.length; i++) {
-    const arg = argv[i];
+    const arg = argv[i] as string;
     if (arg === "-h" || arg === "--help") {
       flags.help = true;
       continue;
@@ -119,7 +183,7 @@ export function parseArgs(argv) {
 }
 
 /** 成功输出：--json 时一行 JSON（Agent 友好），否则人读文本。 */
-function emit(ctx, data, human) {
+function emit(ctx: Ctx, data: unknown, human: string): void {
   if (ctx.json) {
     ctx.stdout(JSON.stringify({ ok: true, data }));
   } else {
@@ -128,19 +192,19 @@ function emit(ctx, data, human) {
 }
 
 /** 读 JSON 文件；路径写错或内容不是 JSON 都属于用法错误（退出码 2）。 */
-function readJSONFile(file) {
+function readJSONFile(file: unknown): JSONValue {
   if (file === true || typeof file !== "string")
     throw new APIError(-1, "需要一个 JSON 文件路径", 2);
-  let text;
+  let text: string;
   try {
     text = fs.readFileSync(file, "utf8");
   } catch (err) {
-    throw new APIError(-1, `读取 ${file} 失败：${err.message}`, 2);
+    throw new APIError(-1, `读取 ${file} 失败：${errorMessage(err)}`, 2);
   }
   try {
     return JSON.parse(text);
   } catch (err) {
-    throw new APIError(-1, `${file} 不是合法 JSON：${err.message}`, 2);
+    throw new APIError(-1, `${file} 不是合法 JSON：${errorMessage(err)}`, 2);
   }
 }
 
@@ -148,7 +212,7 @@ function readJSONFile(file) {
  * 写 JSON 文件并返回展示用的路径。
  * `-` 表示输出到 stdout（与常见 Unix 习惯一致），此时不落盘、也不返回绝对路径。
  */
-function writeJSONFile(ctx, file, value) {
+function writeJSONFile(ctx: Ctx, file: unknown, value: unknown): string {
   const text = `${JSON.stringify(value, null, 2)}\n`;
   if (file === "-") {
     ctx.stdout(text.trimEnd());
@@ -160,7 +224,7 @@ function writeJSONFile(ctx, file, value) {
   try {
     fs.writeFileSync(target, text);
   } catch (err) {
-    throw new APIError(-1, `写入 ${target} 失败：${err.message}`, 0);
+    throw new APIError(-1, `写入 ${target} 失败：${errorMessage(err)}`, 0);
   }
   return target;
 }
@@ -170,7 +234,7 @@ function writeJSONFile(ctx, file, value) {
  * save / create 要的是 canvas graph 的输出（nodes / edges / viewport）；
  * 导出文档额外带 format / canvas / assets，直接写进去会把画布结构弄坏。
  */
-function assertGraphPayload(payload, command) {
+function assertGraphPayload(payload: JSONValue, command: string): void {
   if (payload && typeof payload === "object" && payload.format && payload.canvas) {
     throw new APIError(
       -1,
@@ -182,7 +246,12 @@ function assertGraphPayload(payload, command) {
 }
 
 /** 解析 --output / -o；`-` 表示 stdout，且不能与 --json 同时用。 */
-function resolveOutput(ctx, args, fallback, usage) {
+function resolveOutput(
+  ctx: Ctx,
+  args: Args,
+  fallback: string | undefined,
+  usage: string,
+): string | undefined {
   const raw = args.flags.output !== undefined ? args.flags.output : args.flags.o;
   if (raw === undefined) return fallback;
   if (raw === true || typeof raw !== "string")
@@ -193,7 +262,7 @@ function resolveOutput(ctx, args, fallback, usage) {
 }
 
 /** 尽力打开浏览器；失败静默（用户仍能看到打印的地址）。 */
-function openBrowser(url) {
+function openBrowser(url: string): void {
   const cmd =
     process.platform === "darwin" ? "open" : process.platform === "win32" ? "cmd" : "xdg-open";
   const args = process.platform === "win32" ? ["/c", "start", "", url] : [url];
@@ -204,7 +273,7 @@ function openBrowser(url) {
   }
 }
 
-function requireToken(ctx) {
+function requireToken(ctx: Ctx): string {
   if (!ctx.token) throw new APIError(-1, "还没有登录，先执行 `video-canvas-cli login`", 0);
   return ctx.token;
 }
@@ -214,14 +283,14 @@ function requireToken(ctx) {
  * 构建 ctx 时就失败过（比如 --base 少了 http://），优先抛那条原始错误——
  * 直接把 null 拼进 URL 只会得到误导性的「无法连接 null：Invalid URL」。
  */
-function baseOf(ctx) {
+function baseOf(ctx: Ctx): string {
   if (ctx.base) return ctx.base;
   if (ctx.baseError) throw ctx.baseError;
   throw new APIError(-1, "缺少 API 地址，请用 --base 或环境变量 VC_API_BASE 指定", 2);
 }
 
 /** 把当前有效配置（命令行 > 环境变量 > 已保存）解析成 base。 */
-function resolveBase(ctx, flags) {
+function resolveBase(ctx: Ctx, flags: Flags): string {
   return normalizeBase(flags.base || ctx.env.VC_API_BASE || ctx.creds?.base);
 }
 
@@ -230,14 +299,14 @@ function resolveBase(ctx, flags) {
 // ---------------------------------------------------------------------------
 
 /** 设备授权登录：申请短码 → 用户在网页确认 → 轮询换 JWT。 */
-export async function login(ctx, args) {
+export async function login(ctx: Ctx, args: Args): Promise<void> {
   const base = resolveBase(ctx, args.flags);
-  const clientName = args.flags.name || `video-canvas-cli@${os.hostname()}`;
-  const start = await request({
+  const clientName = String(args.flags.name || `video-canvas-cli@${os.hostname()}`);
+  const start = await request<DeviceStart>({
     base,
     method: "POST",
     path: "/auth/cli/device",
-    body: { client_name: String(clientName).slice(0, 64) },
+    body: { client_name: clientName.slice(0, 64) },
     fetchImpl: ctx.fetchImpl,
   });
 
@@ -254,7 +323,7 @@ export async function login(ctx, args) {
 
   while (Date.now() < deadline) {
     await sleep(interval);
-    const poll = await request({
+    const poll = await request<DevicePoll>({
       base,
       method: "POST",
       path: "/auth/cli/token",
@@ -298,16 +367,16 @@ export async function login(ctx, args) {
 }
 
 /** 退出登录：本地删凭据。服务端 JWT 是自包含的，真正吊销靠网页改密码。 */
-export async function logout(ctx) {
+export async function logout(ctx: Ctx): Promise<void> {
   const removed = clearCredentials(ctx.env);
   emit(ctx, { removed }, removed ? `已删除本地凭据（${ctx.credsPath}）` : "本地没有已保存的凭据");
 }
 
 /** 当前身份：调 /me 验证令牌仍然有效。 */
-export async function whoami(ctx) {
+export async function whoami(ctx: Ctx): Promise<void> {
   const token = requireToken(ctx);
   const base = baseOf(ctx);
-  const me = await request({ base, token, path: "/me", fetchImpl: ctx.fetchImpl });
+  const me = await request<Me>({ base, token, path: "/me", fetchImpl: ctx.fetchImpl });
   const name = me.nickname || me.username;
   emit(
     ctx,
@@ -320,7 +389,7 @@ export async function whoami(ctx) {
 // 画布
 // ---------------------------------------------------------------------------
 
-function formatCanvasRows(list) {
+function formatCanvasRows(list: Canvas[]): string {
   if (!list.length) return "（没有画布）";
   const lines = ["CODE\tREV\tUPDATED\tTITLE"];
   for (const item of list) {
@@ -331,11 +400,11 @@ function formatCanvasRows(list) {
   return lines.join("\n");
 }
 
-export async function canvasList(ctx, args) {
+export async function canvasList(ctx: Ctx, args: Args): Promise<void> {
   const token = requireToken(ctx);
   const pageSizeRaw =
     args.flags["page-size"] !== undefined ? args.flags["page-size"] : args.flags.page_size;
-  const page = await request({
+  const page = await request<Page<Canvas>>({
     base: baseOf(ctx),
     token,
     path: "/canvas",
@@ -355,9 +424,9 @@ export async function canvasList(ctx, args) {
 }
 
 /** 取一张画布的完整数据；code 是画布的对外十六进制 id。 */
-async function fetchCanvas(ctx, code) {
+async function fetchCanvas(ctx: Ctx, code: string): Promise<Canvas> {
   const token = requireToken(ctx);
-  return request({
+  return request<Canvas>({
     base: baseOf(ctx),
     token,
     path: `/canvas/${encodeURIComponent(code)}`,
@@ -365,11 +434,11 @@ async function fetchCanvas(ctx, code) {
   });
 }
 
-export async function canvasGet(ctx, args) {
+export async function canvasGet(ctx: Ctx, args: Args): Promise<void> {
   const code = args.positional[0];
   if (!code) throw new APIError(-1, "用法：canvas get <code>", 2);
   const canvas = await fetchCanvas(ctx, code);
-  const graph = canvas.payload_json || {};
+  const graph: Graph = canvas.payload_json || {};
   const human = [
     `画布：${canvas.title}（${canvas.id}）`,
     `版本：${canvas.revision}`,
@@ -379,218 +448,12 @@ export async function canvasGet(ctx, args) {
   emit(ctx, canvas, human);
 }
 
-export async function canvasCreate(ctx, args) {
-  const token = requireToken(ctx);
-  const usage = "canvas create --title <标题> [--payload 文件]";
-  const title =
-    args.flags.title === undefined ? "未命名画布" : stringFlag(args.flags, "title", usage);
-  const payload =
-    args.flags.payload === undefined
-      ? { nodes: [], edges: [], viewport: { x: 0, y: 0, zoom: 1 } }
-      : readJSONFile(stringFlag(args.flags, "payload", usage));
-  assertGraphPayload(payload, "canvas create");
-
-  const nodes = payload.nodes || [];
-  const edges = payload.edges || [];
-  await confirmCreate(ctx, {
-    what: "canvas create",
-    title,
-    lines: [
-      `内容：${nodes.length ? `${nodes.length} 个节点、${edges.length} 条连线` : "空白画布"}`,
-      `来源：${args.flags.payload === undefined ? "命令行参数（无 payload）" : "命令行参数 --payload"}`,
-    ],
-    hint: "要在脚本里批量建画布，只能在终端里逐次确认；CLI 没有跳过确认的开关。",
-  });
-
-  const canvas = await request({
-    base: baseOf(ctx),
-    token,
-    method: "POST",
-    path: "/canvas",
-    body: { title, payload_json: payload },
-    fetchImpl: ctx.fetchImpl,
-  });
-  emit(ctx, canvas, `已创建：${canvas.title}（${canvas.id}）版本 ${canvas.revision}`);
-}
-
-export async function canvasImport(ctx, args) {
-  const token = requireToken(ctx);
-  const file = args.positional[0] ?? args.flags.file;
-  if (file === undefined) throw new APIError(-1, "用法：canvas import <导出文件.json>", 2);
-  const document = readJSONFile(file);
-  const source = document.canvas || {};
-  const assets = Array.isArray(document.assets)
-    ? document.assets.length
-    : Object.keys(document.assets || {}).length;
-  await confirmCreate(ctx, {
-    what: "canvas import",
-    title: source.title || "（导出文档里没有标题）",
-    lines: [
-      `来源：${typeof file === "string" ? path.resolve(file) : file}`,
-      `内容：${(source.nodes || []).length} 个节点、${(source.edges || []).length} 条连线、${assets} 份素材`,
-    ],
-    hint: "导入只新建画布，不会覆盖已有画布；已存在的画布请用 canvas save 改。",
-  });
-  const result = await request({
-    base: baseOf(ctx),
-    token,
-    method: "POST",
-    path: "/canvas/import",
-    body: { document },
-    fetchImpl: ctx.fetchImpl,
-  });
-  const canvas = result.canvas || result;
-  const report = result.report || {};
-  emit(
-    ctx,
-    result,
-    [
-      `已导入：${canvas.title}（${canvas.id}）`,
-      `素材：复制 ${report.assets?.copied ?? 0} / 共 ${report.assets?.total ?? 0}，丢失 ${report.assets?.missing?.length ?? 0}`,
-      `丢弃连线：${report.edges_dropped ?? 0}`,
-    ].join("\n"),
-  );
-}
-
-export async function canvasExport(ctx, args) {
-  const token = requireToken(ctx);
-  const code = args.positional[0];
-  if (!code) throw new APIError(-1, "用法：canvas export <code> [-o 文件]", 2);
-  const out = resolveOutput(ctx, args, `canvas-${code}.json`, "canvas export <code> [-o 文件]");
-  const result = await request({
-    base: baseOf(ctx),
-    token,
-    path: `/canvas/${encodeURIComponent(code)}/export`,
-    fetchImpl: ctx.fetchImpl,
-  });
-  const document = result.document ?? result;
-  if (out === "-") {
-    ctx.stdout(JSON.stringify(document, null, 2));
-    return;
-  }
-  const saved = writeJSONFile(ctx, out, document);
-  emit(
-    ctx,
-    { file: saved, skipped_assets: result.report?.skipped_assets ?? 0 },
-    `已导出到 ${saved}`,
-  );
-}
-
-export async function canvasGraph(ctx, args) {
-  const code = args.positional[0];
-  if (!code) throw new APIError(-1, "用法：canvas graph <code> [-o 文件]", 2);
-  const out = resolveOutput(ctx, args, undefined, "canvas graph <code> [-o 文件]");
-  const canvas = await fetchCanvas(ctx, code);
-  const graph = canvas.payload_json || { nodes: [], edges: [], viewport: { x: 0, y: 0, zoom: 1 } };
-  if (out === "-") {
-    ctx.stdout(JSON.stringify(graph, null, 2));
-    return;
-  }
-  if (out) {
-    const saved = writeJSONFile(ctx, out, graph);
-    emit(
-      ctx,
-      { file: saved, revision: canvas.revision },
-      `已写出 ${saved}（版本 ${canvas.revision}）`,
-    );
-    return;
-  }
-  if (ctx.json) {
-    ctx.stdout(JSON.stringify({ ok: true, data: { revision: canvas.revision, graph } }));
-    return;
-  }
-  ctx.stdout(JSON.stringify(graph, null, 2));
-}
-
-/** 整图保存：后端只认 revision 乐观锁，没给版本就先读一次当前值。 */
-export async function canvasSave(ctx, args) {
-  const token = requireToken(ctx);
-  const code = args.positional[0];
-  const usage = "canvas save <code> --payload <文件.json> [--revision N]";
-  if (!code) throw new APIError(-1, `用法：${usage}`, 2);
-  const file = stringFlag(args.flags, "payload", usage);
-  const payload = readJSONFile(file);
-  assertGraphPayload(payload, "canvas save");
-  let revision = intFlag(args.flags, "revision", undefined);
-  if (revision === undefined) {
-    const current = await fetchCanvas(ctx, code);
-    revision = current.revision;
-  }
-  const canvas = await request({
-    base: baseOf(ctx),
-    token,
-    method: "PUT",
-    path: `/canvas/${encodeURIComponent(code)}`,
-    body: { revision, payload_json: payload },
-    fetchImpl: ctx.fetchImpl,
-  });
-  emit(ctx, canvas, `已保存，新版本 ${canvas.revision}`);
-}
-
-// ---------------------------------------------------------------------------
-// 节点级编辑：只提交差异，且必须由人在终端确认
-// ---------------------------------------------------------------------------
-
-/** 命令行支持新建的节点种类。其余种类要填内嵌结构，适合在画面上建。 */
-const CLI_NODE_KINDS = ["script", "image", "video", "audio"];
-
-const KIND_NAMES = {
-  script: "文本",
-  image: "图片",
-  video: "视频",
-  audio: "音频",
-  storyboard: "分镜表",
-  compose: "成片",
-  character: "角色",
-  director: "导演台",
-};
-
-const kindName = (kind) => KIND_NAMES[kind] || kind || "节点";
-
-/** 解析 `--at 100,200`。 */
-function parsePoint(raw) {
-  const parts = String(raw).split(",");
-  const x = Number(parts[0]);
-  const y = Number(parts[1]);
-  if (parts.length !== 2 || !Number.isFinite(x) || !Number.isFinite(y))
-    throw new APIError(-1, "--at 需要 x,y 两个数字，例如 --at 100,200", 2);
-  return { x, y };
-}
-
-/** 按 id 找节点；找不到直接报错，别把无效 id 提交给服务端。 */
-function nodeById(graph, id) {
-  const node = (graph.nodes || []).find((n) => n && n.id === id);
-  if (!node) throw new APIError(-1, `画布上没有节点 ${id}`, 2);
-  return node;
-}
-
-/** 把服务端返回的差异排成人能读的几行。 */
-function formatChanges(res) {
-  const lines = [`已保存，版本 ${res.revision}`];
-  for (const c of res.changes || []) {
-    const mark = c.op === "create" ? "+" : c.op === "update" ? "~" : "-";
-    const what = c.kind === "edge" ? "连线" : "节点";
-    const fields = c.op === "update" && c.after ? `（${Object.keys(c.after).join("、")}）` : "";
-    lines.push(`${mark} ${what} ${c.id}${fields}`);
-  }
-  if (lines.length === 1) lines.push("（没有实际改动）");
-  for (const w of res.warnings || []) lines.push(`提醒：${w}`);
-  return lines.join("\n");
-}
-
-/**
- * 等人点头的唯一出口：只认终端里敲的 `yes`。
- * 取消用退出码 4（与「被取消」区分于「失败」），非交互终端与 --json 一律拒绝。
- */
-async function askYes(ctx, question, cancelMessage) {
-  const rl = readline.createInterface({ input: process.stdin, output: process.stderr });
-  let answer = "";
-  try {
-    answer = await rl.question(question);
-  } finally {
-    rl.close();
-  }
-  if (answer.trim() !== "yes") throw new APIError(-1, cancelMessage, 0, 4);
+/** 新建项目前的确认信息。 */
+interface CreateConfirm {
+  what: string;
+  title: string;
+  lines: string[];
+  hint: string;
 }
 
 /**
@@ -602,7 +465,8 @@ async function askYes(ctx, question, cancelMessage) {
  *
  * 三道门与节点级修改一致：--json 不可用（脚本无法"确认"）、stdin/stderr 必须是终端、必须输入 yes。
  */
-async function confirmCreate(ctx, { what, title, lines, hint }) {
+async function confirmCreate(ctx: Ctx, confirm: CreateConfirm): Promise<void> {
+  const { what, title, lines, hint } = confirm;
   if (ctx.json)
     throw new APIError(
       -1,
@@ -625,6 +489,231 @@ async function confirmCreate(ctx, { what, title, lines, hint }) {
 }
 
 /**
+ * 等人点头的唯一出口：只认终端里敲的 `yes`。
+ * 取消用退出码 4（与「被取消」区分于「失败」），非交互终端与 --json 一律拒绝。
+ */
+async function askYes(ctx: Ctx, question: string, cancelMessage: string): Promise<void> {
+  const rl = readline.createInterface({ input: process.stdin, output: process.stderr });
+  let answer = "";
+  try {
+    answer = await rl.question(question);
+  } finally {
+    rl.close();
+  }
+  if (answer.trim() !== "yes") throw new APIError(-1, cancelMessage, 0, 4);
+}
+
+export async function canvasCreate(ctx: Ctx, args: Args): Promise<void> {
+  const token = requireToken(ctx);
+  const usage = "canvas create --title <标题> [--payload 文件]";
+  const title =
+    args.flags.title === undefined ? "未命名画布" : stringFlag(args.flags, "title", usage);
+  const payload: JSONValue =
+    args.flags.payload === undefined
+      ? { nodes: [], edges: [], viewport: { x: 0, y: 0, zoom: 1 } }
+      : readJSONFile(stringFlag(args.flags, "payload", usage));
+  assertGraphPayload(payload, "canvas create");
+
+  const nodes = payload.nodes || [];
+  const edges = payload.edges || [];
+  await confirmCreate(ctx, {
+    what: "canvas create",
+    title,
+    lines: [
+      `内容：${nodes.length ? `${nodes.length} 个节点、${edges.length} 条连线` : "空白画布"}`,
+      `来源：${args.flags.payload === undefined ? "命令行参数（无 payload）" : "命令行参数 --payload"}`,
+    ],
+    hint: "要在脚本里批量建画布，只能在终端里逐次确认；CLI 没有跳过确认的开关。",
+  });
+
+  const canvas = await request<Canvas>({
+    base: baseOf(ctx),
+    token,
+    method: "POST",
+    path: "/canvas",
+    body: { title, payload_json: payload },
+    fetchImpl: ctx.fetchImpl,
+  });
+  emit(ctx, canvas, `已创建：${canvas.title}（${canvas.id}）版本 ${canvas.revision}`);
+}
+
+export async function canvasImport(ctx: Ctx, args: Args): Promise<void> {
+  const token = requireToken(ctx);
+  const file = args.positional[0] ?? args.flags.file;
+  if (file === undefined) throw new APIError(-1, "用法：canvas import <导出文件.json>", 2);
+  const document: JSONValue = readJSONFile(file);
+  const source = document.canvas || {};
+  const assets = Array.isArray(document.assets)
+    ? document.assets.length
+    : Object.keys(document.assets || {}).length;
+  await confirmCreate(ctx, {
+    what: "canvas import",
+    title: source.title || "（导出文档里没有标题）",
+    lines: [
+      `来源：${typeof file === "string" ? path.resolve(file) : file}`,
+      `内容：${(source.nodes || []).length} 个节点、${(source.edges || []).length} 条连线、${assets} 份素材`,
+    ],
+    hint: "导入只新建画布，不会覆盖已有画布；已存在的画布请用 canvas save 改。",
+  });
+  const result = await request<ImportResult>({
+    base: baseOf(ctx),
+    token,
+    method: "POST",
+    path: "/canvas/import",
+    body: { document },
+    fetchImpl: ctx.fetchImpl,
+  });
+  const canvas: Canvas = result.canvas || (result as unknown as Canvas);
+  const report = result.report || {};
+  emit(
+    ctx,
+    result,
+    [
+      `已导入：${canvas.title}（${canvas.id}）`,
+      `素材：复制 ${report.assets?.copied ?? 0} / 共 ${report.assets?.total ?? 0}，丢失 ${report.assets?.missing?.length ?? 0}`,
+      `丢弃连线：${report.edges_dropped ?? 0}`,
+    ].join("\n"),
+  );
+}
+
+export async function canvasExport(ctx: Ctx, args: Args): Promise<void> {
+  const token = requireToken(ctx);
+  const code = args.positional[0];
+  if (!code) throw new APIError(-1, "用法：canvas export <code> [-o 文件]", 2);
+  const out = resolveOutput(ctx, args, `canvas-${code}.json`, "canvas export <code> [-o 文件]");
+  const result = await request<ExportResult>({
+    base: baseOf(ctx),
+    token,
+    path: `/canvas/${encodeURIComponent(code)}/export`,
+    fetchImpl: ctx.fetchImpl,
+  });
+  const document = result.document ?? result;
+  if (out === "-") {
+    ctx.stdout(JSON.stringify(document, null, 2));
+    return;
+  }
+  const saved = writeJSONFile(ctx, out, document);
+  emit(
+    ctx,
+    { file: saved, skipped_assets: result.report?.skipped_assets ?? 0 },
+    `已导出到 ${saved}`,
+  );
+}
+
+export async function canvasGraph(ctx: Ctx, args: Args): Promise<void> {
+  const code = args.positional[0];
+  if (!code) throw new APIError(-1, "用法：canvas graph <code> [-o 文件]", 2);
+  const out = resolveOutput(ctx, args, undefined, "canvas graph <code> [-o 文件]");
+  const canvas = await fetchCanvas(ctx, code);
+  const graph: Graph = canvas.payload_json || {
+    nodes: [],
+    edges: [],
+    viewport: { x: 0, y: 0, zoom: 1 },
+  };
+  if (out === "-") {
+    ctx.stdout(JSON.stringify(graph, null, 2));
+    return;
+  }
+  if (out) {
+    const saved = writeJSONFile(ctx, out, graph);
+    emit(
+      ctx,
+      { file: saved, revision: canvas.revision },
+      `已写出 ${saved}（版本 ${canvas.revision}）`,
+    );
+    return;
+  }
+  if (ctx.json) {
+    ctx.stdout(JSON.stringify({ ok: true, data: { revision: canvas.revision, graph } }));
+    return;
+  }
+  ctx.stdout(JSON.stringify(graph, null, 2));
+}
+
+/** 整图保存：后端只认 revision 乐观锁，没给版本就先读一次当前值。 */
+export async function canvasSave(ctx: Ctx, args: Args): Promise<void> {
+  const token = requireToken(ctx);
+  const code = args.positional[0];
+  const usage = "canvas save <code> --payload <文件.json> [--revision N]";
+  if (!code) throw new APIError(-1, `用法：${usage}`, 2);
+  const file = stringFlag(args.flags, "payload", usage);
+  const payload = readJSONFile(file);
+  assertGraphPayload(payload, "canvas save");
+  let revision = intFlag(args.flags, "revision", undefined);
+  if (revision === undefined) {
+    const current = await fetchCanvas(ctx, code);
+    revision = current.revision;
+  }
+  const canvas = await request<Canvas>({
+    base: baseOf(ctx),
+    token,
+    method: "PUT",
+    path: `/canvas/${encodeURIComponent(code)}`,
+    body: { revision, payload_json: payload },
+    fetchImpl: ctx.fetchImpl,
+  });
+  emit(ctx, canvas, `已保存，新版本 ${canvas.revision}`);
+}
+
+// ---------------------------------------------------------------------------
+// 节点级编辑：只提交差异，且必须由人在终端确认
+// ---------------------------------------------------------------------------
+
+/** 命令行支持新建的节点种类。其余种类要填内嵌结构，适合在画面上建。 */
+const CLI_NODE_KINDS = ["script", "image", "video", "audio"];
+
+const KIND_NAMES: Record<string, string> = {
+  script: "文本",
+  image: "图片",
+  video: "视频",
+  audio: "音频",
+  storyboard: "分镜表",
+  compose: "成片",
+  character: "角色",
+  director: "导演台",
+};
+
+const kindName = (kind?: string): string => (kind ? KIND_NAMES[kind] || kind : "节点");
+
+/** 解析 `--at 100,200`。 */
+function parsePoint(raw: FlagValue): { x: number; y: number } {
+  const parts = String(raw).split(",");
+  const x = Number(parts[0]);
+  const y = Number(parts[1]);
+  if (parts.length !== 2 || !Number.isFinite(x) || !Number.isFinite(y))
+    throw new APIError(-1, "--at 需要 x,y 两个数字，例如 --at 100,200", 2);
+  return { x, y };
+}
+
+/** 按 id 找节点；找不到直接报错，别把无效 id 提交给服务端。 */
+function nodeById(graph: Graph, id: string): CanvasNode {
+  const node = (graph.nodes || []).find((n) => n && n.id === id);
+  if (!node) throw new APIError(-1, `画布上没有节点 ${id}`, 2);
+  return node;
+}
+
+/** 把服务端返回的差异排成人能读的几行。 */
+function formatChanges(res: OpsResult): string {
+  const lines = [`已保存，版本 ${res.revision}`];
+  for (const c of res.changes || []) {
+    const mark = c.op === "create" ? "+" : c.op === "update" ? "~" : "-";
+    const what = c.kind === "edge" ? "连线" : "节点";
+    const fields = c.op === "update" && c.after ? `（${Object.keys(c.after).join("、")}）` : "";
+    lines.push(`${mark} ${what} ${c.id}${fields}`);
+  }
+  if (lines.length === 1) lines.push("（没有实际改动）");
+  for (const w of res.warnings || []) lines.push(`提醒：${w}`);
+  return lines.join("\n");
+}
+
+/** 节点级改动要提交的内容：ops 与 deleteNodeIds 至少有一个，外加给人看的说明。 */
+interface NodeOps {
+  ops?: Array<Record<string, unknown>>;
+  deleteNodeIds?: string[];
+  lines: string[];
+}
+
+/**
  * 节点级改动的唯一出口：先读当前图、把要改的内容摆给人看、等终端确认，
  * 确认后带「刚才读到的那个 revision」提交。
  *
@@ -633,7 +722,11 @@ async function confirmCreate(ctx, { what, title, lines, hint }) {
  *
  * 没有 --yes 之类的旁路：脚本要批量改画布，走 `canvas graph` + `canvas save`。
  */
-async function commitNodeOps(ctx, code, build) {
+async function commitNodeOps(
+  ctx: Ctx,
+  code: string,
+  build: (graph: Graph) => NodeOps,
+): Promise<void> {
   if (ctx.json)
     throw new APIError(
       -1,
@@ -651,7 +744,7 @@ async function commitNodeOps(ctx, code, build) {
     );
 
   const canvas = await fetchCanvas(ctx, code);
-  const graph = canvas.payload_json || { nodes: [], edges: [] };
+  const graph: Graph = canvas.payload_json || { nodes: [], edges: [] };
   const { ops, deleteNodeIds, lines } = build(graph);
 
   ctx.stderr(`画布：${canvas.title}（${code}）当前版本 ${canvas.revision}`);
@@ -659,10 +752,10 @@ async function commitNodeOps(ctx, code, build) {
   for (const line of lines) ctx.stderr(`  ${line}`);
   await askYes(ctx, "确认执行？输入 yes 回车，其它任意输入取消：", "已取消，画布未修改");
 
-  const body = { revision: canvas.revision };
+  const body: Record<string, unknown> = { revision: canvas.revision };
   if (ops?.length) body.ops = ops;
   if (deleteNodeIds?.length) body.deleteNodeIds = deleteNodeIds;
-  const res = await request({
+  const res = await request<OpsResult>({
     base: baseOf(ctx),
     token: requireToken(ctx),
     method: "POST",
@@ -674,7 +767,7 @@ async function commitNodeOps(ctx, code, build) {
 }
 
 /** canvas node add：新建一个普通节点。 */
-export async function canvasNodeAdd(ctx, args) {
+export async function canvasNodeAdd(ctx: Ctx, args: Args): Promise<void> {
   const code = args.positional[0];
   const usage =
     "canvas node add <画布编号> --kind <种类> [--label 标题] [--text 正文] [--prompt 提示词] [--model 模型] [--at x,y]";
@@ -705,7 +798,7 @@ export async function canvasNodeAdd(ctx, args) {
         : stringFlag(args.flags, "prompt", usage);
 
   await commitNodeOps(ctx, code, () => {
-    const op = { op: "create_node", tempId: "n1", kind };
+    const op: Record<string, unknown> = { op: "create_node", tempId: "n1", kind };
     if (label) op.label = label;
     if (content !== undefined) op.prompt = content;
     if (model !== undefined) op.model = model;
@@ -720,7 +813,7 @@ export async function canvasNodeAdd(ctx, args) {
 }
 
 /** canvas node set：改标题、正文、提示词或模型。 */
-export async function canvasNodeSet(ctx, args) {
+export async function canvasNodeSet(ctx: Ctx, args: Args): Promise<void> {
   const code = args.positional[0];
   const id = args.positional[1];
   const usage =
@@ -732,7 +825,7 @@ export async function canvasNodeSet(ctx, args) {
   await commitNodeOps(ctx, code, (graph) => {
     const node = nodeById(graph, id);
     const kind = node.data?.kind;
-    const op = { op: "update_node", id };
+    const op: Record<string, unknown> = { op: "update_node", id };
     const lines = [
       `~ 修改${kindName(kind)}节点 ${id}${node.data?.label ? `「${node.data.label}」` : ""}`,
     ];
@@ -765,7 +858,7 @@ export async function canvasNodeSet(ctx, args) {
 }
 
 /** canvas node rm：删节点，连带清理连线、分镜挂接与成片顺序（由服务端统一处理）。 */
-export async function canvasNodeRm(ctx, args) {
+export async function canvasNodeRm(ctx: Ctx, args: Args): Promise<void> {
   const code = args.positional[0];
   const ids = args.positional.slice(1);
   if (!code || !ids.length)
@@ -773,7 +866,7 @@ export async function canvasNodeRm(ctx, args) {
 
   await commitNodeOps(ctx, code, (graph) => {
     const drop = new Set(ids);
-    const lines = [];
+    const lines: string[] = [];
     for (const id of ids) {
       const node = nodeById(graph, id);
       if (node.type === "group")
@@ -788,10 +881,14 @@ export async function canvasNodeRm(ctx, args) {
     for (const n of graph.nodes || []) {
       const shots = n?.data?.storyboard?.shots;
       if (Array.isArray(shots))
-        for (const shot of shots)
-          if (drop.has(shot?.videoNodeId) || drop.has(shot?.imageNodeId)) refs++;
+        for (const shot of shots) {
+          const video = shot?.videoNodeId;
+          const image = shot?.imageNodeId;
+          if (video && drop.has(video)) refs++;
+          if (image && drop.has(image)) refs++;
+        }
       const order = n?.data?.composeOrder;
-      if (Array.isArray(order)) for (const v of order) if (drop.has(v)) refs++;
+      if (Array.isArray(order)) for (const v of order) if (drop.has(String(v))) refs++;
     }
     if (refs) lines.push(`  同时清掉 ${refs} 处分镜 / 成片引用`);
     return { deleteNodeIds: ids, lines };
@@ -803,17 +900,17 @@ export async function canvasNodeRm(ctx, args) {
 // ---------------------------------------------------------------------------
 
 /** 任务查询：纯数字走 /:id，编码任务号走 ?ids=（列表接口两种都认）。 */
-async function fetchTask(ctx, idOrRef) {
+async function fetchTask(ctx: Ctx, idOrRef: string): Promise<Task> {
   const token = requireToken(ctx);
   if (/^\d+$/.test(idOrRef)) {
-    return request({
+    return request<Task>({
       base: baseOf(ctx),
       token,
       path: `/generation-tasks/${idOrRef}`,
       fetchImpl: ctx.fetchImpl,
     });
   }
-  const list = await request({
+  const list = await request<Task[] | Task>({
     base: baseOf(ctx),
     token,
     path: "/generation-tasks",
@@ -825,7 +922,7 @@ async function fetchTask(ctx, idOrRef) {
   return task;
 }
 
-function formatTask(task) {
+function formatTask(task: Task): string {
   const progress =
     task.progress === null || task.progress === undefined ? "-" : `${task.progress}%`;
   const lines = [
@@ -835,11 +932,12 @@ function formatTask(task) {
     `积分：${task.credits}${task.charged_credits === null ? "" : `（实扣 ${task.charged_credits}）`}`,
   ];
   if (task.error_message) lines.push(`错误：${task.error_code || "-"} ${task.error_message}`);
-  for (const out of task.outputs || []) lines.push(`产物：${out.url || out}`);
+  for (const out of task.outputs || [])
+    lines.push(`产物：${typeof out === "string" ? out : out.url || JSON.stringify(out)}`);
   return lines.join("\n");
 }
 
-export async function taskGet(ctx, args) {
+export async function taskGet(ctx: Ctx, args: Args): Promise<void> {
   const id = args.positional[0];
   if (!id) throw new APIError(-1, "用法：task get <id|task_ref>", 2);
   const task = await fetchTask(ctx, id);
@@ -847,7 +945,7 @@ export async function taskGet(ctx, args) {
 }
 
 /** 等任务到终态。状态变化打到 stderr，stdout 只留最终结果，方便 `--json` 接管道。 */
-export async function taskWait(ctx, args) {
+export async function taskWait(ctx: Ctx, args: Args): Promise<void> {
   const id = args.positional[0];
   if (!id)
     throw new APIError(-1, "用法：task wait <id|task_ref> [--timeout 600] [--interval 3]", 2);
@@ -903,11 +1001,11 @@ export async function taskWait(ctx, args) {
 // ---------------------------------------------------------------------------
 
 /** 取一个可重复 flag 的值：支持给多次，也支持一次给逗号分隔。 */
-function listFlag(flags, name) {
+function listFlag(flags: Flags, name: string): string[] {
   const raw = flags[name];
   if (raw === undefined) return [];
-  const values = Array.isArray(raw) ? raw : [raw];
-  const out = [];
+  const values: Array<string | true> = Array.isArray(raw) ? raw : [raw];
+  const out: string[] = [];
   for (const value of values) {
     if (value === true || typeof value !== "string")
       throw new APIError(-1, `--${name} 需要值，例如 --${name} 1024`, 2);
@@ -919,7 +1017,7 @@ function listFlag(flags, name) {
   return out;
 }
 
-function formatModelRows(list) {
+function formatModelRows(list: Model[]): string {
   if (!list.length) return "（没有可用模型）";
   const lines = ["KEY\tKIND\tLABEL\tHINT"];
   for (const item of list) {
@@ -929,13 +1027,13 @@ function formatModelRows(list) {
 }
 
 /** 可用的模型清单（已上架、渠道与插件都就绪的）。 */
-export async function modelList(ctx, args) {
+export async function modelList(ctx: Ctx, args: Args): Promise<void> {
   const token = requireToken(ctx);
   const kind = args.flags.kind;
   if (kind !== undefined && (kind === true || typeof kind !== "string"))
     throw new APIError(-1, "用法：model list [--kind image|video|audio|text]", 2);
   const models =
-    (await request({
+    (await request<Model[]>({
       base: baseOf(ctx),
       token,
       path: "/models",
@@ -945,16 +1043,34 @@ export async function modelList(ctx, args) {
   emit(ctx, models, formatModelRows(models));
 }
 
+/** 一行参数说明：范围 / 默认值 / 是否在画布上隐藏。 */
+function formatParamLine(name: string, field: ModelParamField): string {
+  const range =
+    field.type === "enum"
+      ? `可选 ${(field.options || []).join(" / ")}`
+      : field.type === "number"
+        ? `${field.min ?? "-"}–${field.max ?? "-"}${field.unit ? ` ${field.unit}` : ""}`
+        : "布尔";
+  const fallback = field.open === false ? "，画布上不显示、按默认发送" : "";
+  const preset = field.default !== undefined ? `，默认 ${JSON.stringify(field.default)}` : "";
+  return `参数 ${name}：${field.label || name}（${range}${preset}${fallback}）`;
+}
+
 /**
  * 单个模型的细节：生成方式、参数（--param 能填什么）、参考素材上限、计价。
  * 这些正是提交生成时最容易猜错的部分，所以单独一条命令，而不是让用户翻后台。
  */
-export async function modelShow(ctx, args) {
+export async function modelShow(ctx: Ctx, args: Args): Promise<void> {
   const key = args.positional[0];
   if (!key) throw new APIError(-1, "用法：model show <模型 key>", 2);
   const token = requireToken(ctx);
   const models =
-    (await request({ base: baseOf(ctx), token, path: "/models", fetchImpl: ctx.fetchImpl })) || [];
+    (await request<Model[]>({
+      base: baseOf(ctx),
+      token,
+      path: "/models",
+      fetchImpl: ctx.fetchImpl,
+    })) || [];
   const model = models.find((item) => item.key === key);
   if (!model) {
     const near = models
@@ -973,19 +1089,9 @@ export async function modelShow(ctx, args) {
     `生成方式：${(caps.ops || []).join(" / ") || "-"}`,
   ];
   // capabilities.params 在接口里是「名字 -> 字段」的对象（键序就是画布参数面板的顺序），不是数组
-  const params = caps.params && typeof caps.params === "object" ? Object.entries(caps.params) : [];
-  for (const [name, field] of params) {
-    const range =
-      field.type === "enum"
-        ? `可选 ${(field.options || []).join(" / ")}`
-        : field.type === "number"
-          ? `${field.min ?? "-"}–${field.max ?? "-"}${field.unit ? ` ${field.unit}` : ""}`
-          : "布尔";
-    const fallback = field.open === false ? "，画布上不显示、按默认发送" : "";
-    lines.push(
-      `参数 ${name}：${field.label || name}（${range}${field.default !== undefined ? `，默认 ${JSON.stringify(field.default)}` : ""}${fallback}）`,
-    );
-  }
+  const params: Array<[string, ModelParamField]> =
+    caps.params && typeof caps.params === "object" ? Object.entries(caps.params) : [];
+  for (const [name, field] of params) lines.push(formatParamLine(name, field));
   if (caps.prompt?.max) lines.push(`提示词上限：${caps.prompt.max} 字`);
   for (const [type, spec] of Object.entries(caps.refs || {})) {
     if (!spec?.on) continue;
@@ -998,9 +1104,9 @@ export async function modelShow(ctx, args) {
 }
 
 /** 当前积分：余额、冻结中、可用。 */
-export async function credits(ctx) {
+export async function credits(ctx: Ctx): Promise<void> {
   const token = requireToken(ctx);
-  const data = await request({
+  const data = await request<{ balance: number; frozen: number; available: number }>({
     base: baseOf(ctx),
     token,
     path: "/credits",
@@ -1013,31 +1119,31 @@ export async function credits(ctx) {
 // 生成：提交 /generation-tasks
 // ---------------------------------------------------------------------------
 
-const GENERATE_KINDS = new Set(["image", "video", "audio", "text"]);
+const GENERATE_KINDS = new Set<string>(["image", "video", "audio", "text"]);
 
 /** 读 --input：JSON 字符串、@文件 或 -（标准输入）。只接受对象。 */
-function readInputJSON(flags, usage) {
+function readInputJSON(flags: Flags, usage: string): Record<string, unknown> {
   const raw = flags.input;
   if (raw === undefined) return {};
   if (raw === true || typeof raw !== "string")
     throw new APIError(-1, `--input 需要 JSON 字符串、@文件 或 -；用法：${usage}`, 2);
-  let text;
+  let text: string;
   if (raw === "-") {
     try {
       text = fs.readFileSync(0, "utf8");
     } catch (err) {
-      throw new APIError(-1, `读取标准输入失败：${err.message}`, 2);
+      throw new APIError(-1, `读取标准输入失败：${errorMessage(err)}`, 2);
     }
   } else if (raw.startsWith("@")) {
     return readJSONFile(raw.slice(1));
   } else {
     text = raw;
   }
-  let parsed;
+  let parsed: JSONValue;
   try {
     parsed = JSON.parse(text);
   } catch (err) {
-    throw new APIError(-1, `--input 不是合法 JSON：${err.message}`, 2);
+    throw new APIError(-1, `--input 不是合法 JSON：${errorMessage(err)}`, 2);
   }
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
     throw new APIError(-1, '--input 需要 JSON 对象，例如 \'{"prompt":"海边日出"}\'', 2);
@@ -1045,15 +1151,15 @@ function readInputJSON(flags, usage) {
 }
 
 /** 把 --input / --prompt / --param / --ref-* 合成接口要的 input 对象。 */
-function buildGenerateInput(flags, usage) {
-  const input = { ...readInputJSON(flags, usage) };
+function buildGenerateInput(flags: Flags, usage: string): Record<string, unknown> {
+  const input: Record<string, unknown> = { ...readInputJSON(flags, usage) };
   if (flags.prompt !== undefined) input.prompt = stringFlag(flags, "prompt", usage);
   for (const pair of listFlag(flags, "param")) {
     const eq = pair.indexOf("=");
     if (eq < 1) throw new APIError(-1, `--param 要写成 名=值，收到「${pair}」`, 2);
     const name = pair.slice(0, eq).trim();
     const raw = pair.slice(eq + 1);
-    let value = raw;
+    let value: unknown = raw;
     // 数字、布尔、数组按 JSON 解释，其余按字符串：CLI 上 `--param duration=5` 最自然
     try {
       value = JSON.parse(raw);
@@ -1062,11 +1168,12 @@ function buildGenerateInput(flags, usage) {
     }
     input[name] = value;
   }
-  for (const [key, name] of [
+  const refFlags: Array<[string, string]> = [
     ["ref-image", "images"],
     ["ref-video", "videos"],
     ["ref-audio", "audios"],
-  ]) {
+  ];
+  for (const [key, name] of refFlags) {
     const ids = listFlag(flags, key);
     if (!ids.length) continue;
     input[name] = ids.map((id) => {
@@ -1079,7 +1186,12 @@ function buildGenerateInput(flags, usage) {
 }
 
 /** 提交后等任务到终态；超时抛退出码 3，与 task wait 一致。 */
-async function waitTaskTerminal(ctx, id, { timeoutSeconds, intervalSeconds }) {
+async function waitTaskTerminal(
+  ctx: Ctx,
+  id: string,
+  opts: { timeoutSeconds: number; intervalSeconds: number },
+): Promise<Task> {
+  const { timeoutSeconds, intervalSeconds } = opts;
   const deadline = Date.now() + timeoutSeconds * 1000;
   let last = "";
   while (Date.now() < deadline) {
@@ -1101,8 +1213,8 @@ async function waitTaskTerminal(ctx, id, { timeoutSeconds, intervalSeconds }) {
   );
 }
 
-function formatSubmittedItems(items) {
-  const lines = [];
+function formatSubmittedItems(items: GenerateItem[]): string {
+  const lines: string[] = [];
   for (const item of items) {
     if (item.task) {
       lines.push(
@@ -1119,7 +1231,7 @@ function formatSubmittedItems(items) {
  * 提交一次生成。产物回填由画布负责：任务已经绑在节点上，打开画布时按节点拉取生成记录并落到节点，
  * 与在网页上点生成是同一条链路——CLI 不自己改节点，也就不会和画布里的编辑抢版本。
  */
-export async function generate(ctx, args) {
+export async function generate(ctx: Ctx, args: Args): Promise<void> {
   const kind = args.positional[0];
   const usage =
     "generate <image|video|audio|text> --model <模型key> " +
@@ -1134,10 +1246,11 @@ export async function generate(ctx, args) {
   const model = stringFlag(args.flags, "model", usage);
   const canvas = args.flags.canvas;
   const node = args.flags.node;
-  for (const [name, value] of [
+  const targets: Array<[string, FlagValue | undefined]> = [
     ["canvas", canvas],
     ["node", node],
-  ]) {
+  ];
+  for (const [name, value] of targets) {
     if (value !== undefined && (value === true || typeof value !== "string"))
       throw new APIError(-1, `--${name} 需要字符串值。用法：${usage}`, 2);
   }
@@ -1153,7 +1266,7 @@ export async function generate(ctx, args) {
   if (count > 1 && node === undefined)
     throw new APIError(-1, "--count 大于 1 时必须给 --node：多个任务要绑在同一个节点上", 2);
 
-  const body = { kind, model_id: model, input };
+  const body: Record<string, unknown> = { kind, model_id: model, input };
   if (canvas !== undefined) body.canvas_id = canvas;
   if (node !== undefined) {
     body.node_id = node;
@@ -1165,7 +1278,7 @@ export async function generate(ctx, args) {
     typeof args.flags["idempotency-key"] === "string"
       ? args.flags["idempotency-key"]
       : randomUUID();
-  const res = await request({
+  const res = await request<GenerateResponse>({
     base: baseOf(ctx),
     token,
     method: "POST",
@@ -1175,7 +1288,7 @@ export async function generate(ctx, args) {
     fetchImpl: ctx.fetchImpl,
   });
   const items = Array.isArray(res?.items) ? res.items : [];
-  const tasks = items.map((item) => item.task).filter(Boolean);
+  const tasks = items.map((item) => item.task).filter((task): task is Task => Boolean(task));
   const failures = items.filter((item) => item.error);
   if (!tasks.length) {
     const first = failures[0]?.error;
@@ -1201,9 +1314,9 @@ export async function generate(ctx, args) {
 
   const timeoutSeconds = intFlag(args.flags, "timeout", 600, { max: 86400 });
   const intervalSeconds = intFlag(args.flags, "interval", 3, { max: 3600 });
-  const settled = [];
+  const settled: Task[] = [];
   for (const task of tasks) {
-    settled.push(await waitTaskTerminal(ctx, task.id, { timeoutSeconds, intervalSeconds }));
+    settled.push(await waitTaskTerminal(ctx, String(task.id), { timeoutSeconds, intervalSeconds }));
   }
   const failed = settled.filter((task) => task.status !== "succeeded");
   const human = [formatSubmittedItems(items), "", ...settled.map((task) => formatTask(task))].join(
@@ -1213,13 +1326,14 @@ export async function generate(ctx, args) {
     emit(ctx, { items, tasks: settled }, human);
     return;
   }
+  const firstFailed = failed[0] as Task;
   if (ctx.json) {
     ctx.stdout(
       JSON.stringify({
         ok: false,
         error: {
-          code: failed[0].error_code ?? -1,
-          message: failed[0].error_message || `任务${failed[0].status}`,
+          code: firstFailed.error_code ?? -1,
+          message: firstFailed.error_message || `任务${firstFailed.status}`,
         },
         data: { items, tasks: settled },
       }),
@@ -1234,10 +1348,10 @@ export async function generate(ctx, args) {
 // 合成成片
 // ---------------------------------------------------------------------------
 
-const TERMINAL_COMPOSE_STATUSES = new Set(["succeeded", "failed", "canceled"]);
+const TERMINAL_COMPOSE_STATUSES = new Set<string>(["succeeded", "failed", "canceled"]);
 
 /** 节点当前生效的素材 id：优先 activeOutputId 指向的那一版，老节点只有 assetId。 */
-function activeAssetIdOf(data) {
+function activeAssetIdOf(data?: CanvasNodeData): string {
   const activeId = data?.activeOutputId;
   const outputs = Array.isArray(data?.outputs) ? data.outputs : [];
   if (activeId !== undefined && activeId !== null) {
@@ -1252,7 +1366,10 @@ function activeAssetIdOf(data) {
  * 先认 data.composeOrder（用户手动调过的段序），其余按画布位置（先上下、再左右）。
  * 只收视频节点；还没出视频的段跳过，并在返回值里报出来。
  */
-function deriveComposeAssets(graph, nodeId) {
+function deriveComposeAssets(
+  graph: Graph,
+  nodeId: string,
+): { rows: ComposeRow[]; missing: number[] } {
   const nodes = graph.nodes || [];
   const composeNode = nodes.find((item) => item.id === nodeId);
   if (!composeNode) throw new APIError(-1, `画布里找不到节点 ${nodeId}`, 0);
@@ -1267,8 +1384,8 @@ function deriveComposeAssets(graph, nodeId) {
   const sources = (graph.edges || [])
     .filter((edge) => edge.target === nodeId)
     .map((edge) => nodes.find((item) => item.id === edge.source))
-    .filter((item) => item && item.data?.kind === "video");
-  const positionOf = (item) => ({
+    .filter((item): item is CanvasNode => Boolean(item) && item?.data?.kind === "video");
+  const positionOf = (item: CanvasNode): { x: number; y: number } => ({
     x: Number(item.position?.x ?? 0),
     y: Number(item.position?.y ?? 0),
   });
@@ -1284,8 +1401,8 @@ function deriveComposeAssets(graph, nodeId) {
     if (rb === undefined) return -1;
     return ra - rb;
   });
-  const rows = [];
-  const missing = [];
+  const rows: ComposeRow[] = [];
+  const missing: number[] = [];
   sorted.forEach((item, seq) => {
     const assetId = activeAssetIdOf(item.data);
     if (!assetId) {
@@ -1298,7 +1415,7 @@ function deriveComposeAssets(graph, nodeId) {
   return { rows, missing };
 }
 
-function formatComposeRows(rows) {
+function formatComposeRows(rows: ComposeRow[]): string {
   if (!rows.length) return "（成片节点上没有连进来的视频）";
   const lines = ["SEQ\tASSET\tNODE\tLABEL"];
   for (const row of rows) {
@@ -1307,7 +1424,7 @@ function formatComposeRows(rows) {
   return lines.join("\n");
 }
 
-function formatComposeJob(job) {
+function formatComposeJob(job: ComposeJob): string {
   const lines = [`合成任务：${job.id}`, `状态：${job.status}`];
   if (job.segment_count !== undefined) lines.push(`片段：${job.segment_count}`);
   if (job.duration_ms) lines.push(`时长：${(job.duration_ms / 1000).toFixed(1)} 秒`);
@@ -1322,7 +1439,7 @@ function formatComposeJob(job) {
  * 不给 --assets 时按画布里的成片节点推导（composeOrder 优先），并把推导结果打出来，
  * 用户能对着看是不是想要的顺序——顺序错了成片就错了，不能猜完不吭声。
  */
-export async function canvasCompose(ctx, args) {
+export async function canvasCompose(ctx: Ctx, args: Args): Promise<void> {
   const code = args.positional[0];
   const usage =
     "canvas compose <画布编号> --node <成片节点id> [--assets 素材id,素材id...] [--seqs 1,2,3] " +
@@ -1332,12 +1449,12 @@ export async function canvasCompose(ctx, args) {
   if (node === true || typeof node !== "string")
     throw new APIError(-1, `--node 需要成片节点 id。用法：${usage}`, 2);
 
-  let rows = [];
+  let rows: ComposeRow[] = [];
   let assetIds = listFlag(args.flags, "assets");
   let derived = false;
   if (!assetIds.length) {
     const canvas = await fetchCanvas(ctx, code);
-    const graph = canvas.payload_json || {};
+    const graph: Graph = canvas.payload_json || {};
     const result = deriveComposeAssets(graph, node);
     rows = result.rows;
     assetIds = result.rows.map((row) => row.assetId).filter(Boolean);
@@ -1351,13 +1468,13 @@ export async function canvasCompose(ctx, args) {
       );
   }
 
-  const body = { node_id: node, asset_ids: assetIds };
+  const body: Record<string, unknown> = { node_id: node, asset_ids: assetIds };
   const seqs = listFlag(args.flags, "seqs").map((raw) => toInt(raw, "seqs", { min: 0 }));
   if (seqs.length) body.seqs = seqs;
   if (typeof args.flags.mode === "string") body.mode = args.flags.mode;
 
   const token = requireToken(ctx);
-  const job = await request({
+  const job = await request<ComposeJob>({
     base: baseOf(ctx),
     token,
     method: "POST",
@@ -1382,10 +1499,10 @@ export async function canvasCompose(ctx, args) {
   let last = "";
   let final = job;
   while (Date.now() < deadline) {
-    final = await request({
+    final = await request<ComposeJob>({
       base: baseOf(ctx),
       token,
-      path: `/canvas/${encodeURIComponent(code)}/compose/${encodeURIComponent(job.id)}`,
+      path: `/canvas/${encodeURIComponent(code)}/compose/${encodeURIComponent(String(job.id))}`,
       fetchImpl: ctx.fetchImpl,
     });
     if (final.status !== last) {
@@ -1423,7 +1540,7 @@ export async function canvasCompose(ctx, args) {
 }
 
 /** 查合成任务：给 --job 就按任务 id 查，给 --node 就查该节点上最新的任务（含是否已过期）。 */
-export async function canvasComposeStatus(ctx, args) {
+export async function canvasComposeStatus(ctx: Ctx, args: Args): Promise<void> {
   const code = args.positional[0];
   const usage =
     "canvas compose-status <画布编号> [--job <任务id> | --node <成片节点id> [--assets 素材id,...]]";
@@ -1436,7 +1553,7 @@ export async function canvasComposeStatus(ctx, args) {
   if (jobId !== undefined) {
     if (jobId === true || typeof jobId !== "string")
       throw new APIError(-1, `--job 需要任务 id。用法：${usage}`, 2);
-    const job = await request({
+    const job = await request<ComposeJob>({
       base: baseOf(ctx),
       token,
       path: `/canvas/${encodeURIComponent(code)}/compose/${encodeURIComponent(jobId)}`,
@@ -1448,7 +1565,7 @@ export async function canvasComposeStatus(ctx, args) {
   if (node === true || typeof node !== "string")
     throw new APIError(-1, `--node 需要成片节点 id。用法：${usage}`, 2);
   const assets = listFlag(args.flags, "assets");
-  const res = await request({
+  const res = await request<ComposeActive | null>({
     base: baseOf(ctx),
     token,
     path: `/canvas/${encodeURIComponent(code)}/compose/active`,
@@ -1464,13 +1581,13 @@ export async function canvasComposeStatus(ctx, args) {
 }
 
 /** 取消还没落终态的合成任务。 */
-export async function canvasComposeCancel(ctx, args) {
+export async function canvasComposeCancel(ctx: Ctx, args: Args): Promise<void> {
   const code = args.positional[0];
   const usage = "canvas compose-cancel <画布编号> --job <任务id>";
   if (!code || args.flags.job === undefined) throw new APIError(-1, `用法：${usage}`, 2);
   const jobId = stringFlag(args.flags, "job", usage);
   const token = requireToken(ctx);
-  const job = await request({
+  const job = await request<ComposeJob>({
     base: baseOf(ctx),
     token,
     method: "POST",
@@ -1484,7 +1601,7 @@ export async function canvasComposeCancel(ctx, args) {
 // 短剧：只读与任务控制
 // ---------------------------------------------------------------------------
 
-function formatDramaRows(list) {
+function formatDramaRows(list: DramaSummary[]): string {
   if (!list.length) return "（没有短剧）";
   const lines = ["CODE\tSTATUS\tPHASE\tEPISODES\tLOCKED\tUPDATED\tTITLE"];
   for (const item of list) {
@@ -1500,7 +1617,7 @@ function formatDramaRows(list) {
 }
 
 /** 集号列表压成一行：96 集全铺开会把表格挤成两屏，超过 6 个就收成区间。 */
-function formatEpisodes(list) {
+function formatEpisodes(list?: number[]): string {
   const episodes = (list || []).slice().sort((a, b) => a - b);
   if (!episodes.length) return "-";
   if (episodes.length <= 6) return episodes.join(",");
@@ -1509,7 +1626,7 @@ function formatEpisodes(list) {
   return `${head}…${tail}（${episodes.length} 集）`;
 }
 
-function formatJobRows(list) {
+function formatJobRows(list: DramaJob[]): string {
   if (!list.length) return "（没有任务）";
   const lines = ["JOB\tSTEP\tSTATUS\tPROGRESS\tEPISODES\tLANE\tCREDITS"];
   for (const job of list) {
@@ -1520,13 +1637,13 @@ function formatJobRows(list) {
   return lines.join("\n");
 }
 
-function formatDramaDetail(view, episodeLimit = 10) {
+function formatDramaDetail(view: DramaView, episodeLimit = 10): string {
   const lines = [
     `${view.title}（${view.id}）`,
     `状态：${view.status}  阶段：${view.phase || "-"}`,
     `原文：${view.source_chars ?? 0} 字  单元：${view.units_total ?? 0} 个（${view.unit_kind || "-"}）`,
   ];
-  if (view.target_episodes > 0)
+  if ((view.target_episodes ?? 0) > 0)
     lines.push(
       `目标：${view.target_episodes} 集 × ${view.episode_seconds ?? 0} 秒  画幅：${view.ratio || "-"}`,
     );
@@ -1552,15 +1669,15 @@ function formatDramaDetail(view, episodeLimit = 10) {
   return lines.join("\n");
 }
 
-const pageOf = (res) =>
+const pageOf = <T>(res: T[] | Page<T> | null | undefined): Page<T> =>
   Array.isArray(res)
     ? { list: res, total: res.length, page: 1, page_size: res.length }
     : res || { list: [], total: 0 };
 
-export async function dramaList(ctx, args) {
+export async function dramaList(ctx: Ctx, args: Args): Promise<void> {
   const token = requireToken(ctx);
   const page = pageOf(
-    await request({
+    await request<DramaSummary[] | Page<DramaSummary>>({
       base: baseOf(ctx),
       token,
       path: "/dramas",
@@ -1580,13 +1697,13 @@ export async function dramaList(ctx, args) {
   );
 }
 
-export async function dramaGet(ctx, args) {
+export async function dramaGet(ctx: Ctx, args: Args): Promise<void> {
   const code = args.positional[0];
   const usage = "drama get <短剧编号> [--episodes 10（0 表示全部）]";
   if (!code) throw new APIError(-1, `用法：${usage}`, 2);
   const episodeLimit = intFlag(args.flags, "episodes", 10, { min: 0, max: 1000 });
   const token = requireToken(ctx);
-  const view = await request({
+  const view = await request<DramaView>({
     base: baseOf(ctx),
     token,
     path: `/dramas/${encodeURIComponent(code)}`,
@@ -1595,13 +1712,13 @@ export async function dramaGet(ctx, args) {
   emit(ctx, view, formatDramaDetail(view, episodeLimit));
 }
 
-export async function dramaUnits(ctx, args) {
+export async function dramaUnits(ctx: Ctx, args: Args): Promise<void> {
   const code = args.positional[0];
   if (!code) throw new APIError(-1, "用法：drama units <短剧编号> [--from 1] [--to 20]", 2);
   const token = requireToken(ctx);
   const from = intFlag(args.flags, "from", undefined, { min: 1 });
   const to = intFlag(args.flags, "to", undefined, { min: 1 });
-  const res = await request({
+  const res = await request<DramaUnit[] | { items?: DramaUnit[] }>({
     base: baseOf(ctx),
     token,
     path: `/dramas/${encodeURIComponent(code)}/units`,
@@ -1616,12 +1733,12 @@ export async function dramaUnits(ctx, args) {
   emit(ctx, items, items.length ? ["NO\tTITLE\tCHARS", ...lines].join("\n") : "（没有单元）");
 }
 
-export async function dramaUnit(ctx, args) {
+export async function dramaUnit(ctx: Ctx, args: Args): Promise<void> {
   const code = args.positional[0];
   const no = args.positional[1];
   if (!code || !no) throw new APIError(-1, "用法：drama unit <短剧编号> <单元号>", 2);
   const token = requireToken(ctx);
-  const unit = await request({
+  const unit = await request<DramaUnit>({
     base: baseOf(ctx),
     token,
     path: `/dramas/${encodeURIComponent(code)}/units/${encodeURIComponent(no)}`,
@@ -1638,11 +1755,11 @@ export async function dramaUnit(ctx, args) {
   );
 }
 
-export async function dramaJobs(ctx, args) {
+export async function dramaJobs(ctx: Ctx, args: Args): Promise<void> {
   const code = args.positional[0];
   if (!code) throw new APIError(-1, "用法：drama jobs <短剧编号> [--active]", 2);
   const token = requireToken(ctx);
-  const res = await request({
+  const res = await request<{ items?: DramaJob[] } | null>({
     base: baseOf(ctx),
     token,
     path: `/dramas/${encodeURIComponent(code)}/jobs`,
@@ -1653,13 +1770,13 @@ export async function dramaJobs(ctx, args) {
   emit(ctx, { items }, formatJobRows(items));
 }
 
-export async function dramaJobCancel(ctx, args) {
+export async function dramaJobCancel(ctx: Ctx, args: Args): Promise<void> {
   const code = args.positional[0];
   const usage = "drama job-cancel <短剧编号> --job <任务id>";
   if (!code || args.flags.job === undefined) throw new APIError(-1, `用法：${usage}`, 2);
   const jobId = stringFlag(args.flags, "job", usage);
   const token = requireToken(ctx);
-  const job = await request({
+  const job = await request<DramaJob>({
     base: baseOf(ctx),
     token,
     method: "POST",
@@ -1680,7 +1797,7 @@ export async function dramaJobCancel(ctx, args) {
  * 独立安装包不带 scripts/，所以额外支持 --script 与 VC_AGENT_TRACE；
  * 都找不到时给出可操作的提示，而不是只说「请在仓库内运行」。
  */
-export function trace(ctx, args) {
+export function trace(ctx: Ctx, args: Args): void {
   const script = resolveTraceScript(ctx, args);
   const child = spawn(process.execPath, [script, ...args.positional, ...flagsToArgv(args.flags)], {
     stdio: "inherit",
@@ -1692,7 +1809,7 @@ export function trace(ctx, args) {
 }
 
 /** 定位 agent-trace：显式参数 > 环境变量 > 仓库相对路径 > 当前目录。 */
-function resolveTraceScript(ctx, args) {
+function resolveTraceScript(ctx: Ctx, args: Args): string {
   const explicit = args.flags.script ?? ctx.env.VC_AGENT_TRACE;
   if (explicit !== undefined) {
     if (explicit === true || typeof explicit !== "string")
@@ -1702,6 +1819,7 @@ function resolveTraceScript(ctx, args) {
     return target;
   }
   const here = path.dirname(fileURLToPath(import.meta.url));
+  // 源码在 cli/src、产物在 cli/dist，两种位置的上一级都是 cli/
   const candidates = [
     path.resolve(here, "../../scripts/agent-trace/agent-trace.mjs"),
     path.resolve(process.cwd(), "scripts/agent-trace/agent-trace.mjs"),
@@ -1721,8 +1839,8 @@ function resolveTraceScript(ctx, args) {
   );
 }
 
-function flagsToArgv(flags) {
-  const out = [];
+function flagsToArgv(flags: Flags): string[] {
+  const out: string[] = [];
   for (const [key, value] of Object.entries(flags)) {
     // --json / --base / --script 是本 CLI 的选项，agent-trace 不认，不能透传
     if (key === "help" || key === "json" || key === "base" || key === "script") continue;

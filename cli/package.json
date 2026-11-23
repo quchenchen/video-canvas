@@ -1,17 +1,25 @@
 {
   "name": "video-canvas-cli",
-  "version": "0.3.3",
+  "version": "0.4.0",
   "private": true,
-  "description": "连镜（video-canvas）命令行：设备授权登录、画布读写、生成任务等待、运行记录导出",
+  "description": "连镜（video-canvas）命令行：设备授权登录、画布读写、生成与合成、任务等待、运行记录导出",
   "bin": {
-    "vc": "./bin/vc.mjs",
-    "video-canvas-cli": "./bin/vc.mjs"
+    "vc": "./dist/cli.js",
+    "video-canvas-cli": "./dist/cli.js"
   },
   "type": "module",
+  "files": ["dist", "README.md"],
   "scripts": {
-    "test": "node --test test/*.test.mjs"
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json",
+    "pretest": "npm run build",
+    "test": "node --test test/*.test.ts"
   },
   "engines": {
     "node": ">=18"
+  },
+  "devDependencies": {
+    "@types/node": "^24.19.0",
+    "typescript": "~6.0.2"
   }
 }

@@ -21,8 +21,27 @@ curl -fsSL https://你的站点/api/v1/cli/install.sh | sh
 irm https://你的站点/api/v1/cli/install.ps1 | iex
 ```
 
-零第三方依赖，Node 18+。仓库里也能直接跑：`node cli/bin/vc.mjs --help`；
-`vc --version` 打印自己的版本，`vc --version --json` 给脚本读。
+运行时零第三方依赖，需要 Node 18+。`vc --version` 打印自己的版本，`vc --version --json` 给脚本读。
+
+## 开发（改源码才需要）
+
+源码是 TypeScript（`src/*.ts`），装好的包与镜像里用的是编译产物 `dist/*.js`，
+**装的人不需要 TypeScript，也不需要 `npm install`**。
+
+```bash
+cd cli
+npm install          # 只有 typescript 与 @types/node 两个开发依赖
+npm run build        # tsc -p tsconfig.json → dist/
+npm run typecheck    # 源码 + 测试一起做类型检查
+npm test             # 先 build，再用 node --test 跑 49 个用例
+node dist/cli.js --help
+```
+
+- 改源码后必须 `npm run build`：`dist/` 不入库，但镜像与安装包都从它打包
+  （`backend/Dockerfile` 里有一道检查，`dist/cli.js` 缺失会直接构建失败）。
+- 测试用 Node 22 的类型擦除直接跑 `.ts`（`import` 里写 `.ts`，`tsc` 产出时改写成 `.js`），
+  所以**开发要 Node 22+，用户运行只要 18+**。
+- 版本号只改 `package.json`，安装包名、`vc --version`、站点页面都读它。
 
 ## 登录
 

@@ -72,7 +72,7 @@ func TestCLIReleasePackages(t *testing.T) {
 	if !strings.HasSuffix(name, ".tgz") {
 		t.Fatalf("unix 包名 = %q，期望 .tgz", name)
 	}
-	for _, want := range []string{"package.json", "bin/vc.mjs", "src/client.mjs"} {
+	for _, want := range []string{"package.json", "dist/cli.js", "dist/client.js"} {
 		if !hasName(tarNames(t, data), want) {
 			t.Fatalf("tgz 缺少 %s，实际 %v", want, tarNames(t, data))
 		}
@@ -85,11 +85,11 @@ func TestCLIReleasePackages(t *testing.T) {
 	if !strings.HasSuffix(winName, ".zip") {
 		t.Fatalf("windows 包名 = %q，期望 .zip", winName)
 	}
-	if !hasName(zipNames(t, winData), "bin/vc.mjs") {
-		t.Fatalf("zip 缺少 bin/vc.mjs，实际 %v", zipNames(t, winData))
+	if !hasName(zipNames(t, winData), "dist/cli.js") {
+		t.Fatalf("zip 缺少 dist/cli.js，实际 %v", zipNames(t, winData))
 	}
 	// 两个包都只装运行需要的东西，别把测试源码带进安装目录
-	if hasName(tarNames(t, data), "test/client.test.mjs") {
+	if hasName(tarNames(t, data), "test/client.test.ts") {
 		t.Fatal("tgz 不该包含 test/")
 	}
 }

@@ -7,10 +7,12 @@ import { fileURLToPath } from "node:url";
 
 // 版本与 beta 标记：安装包、`vc --version`、站点界面读的是同一份 package.json。
 const here = path.dirname(fileURLToPath(import.meta.url));
-const bin = path.join(here, "..", "bin", "vc.mjs");
-const pkg = JSON.parse(readFileSync(path.join(here, "..", "package.json"), "utf8"));
+const bin = path.join(here, "..", "dist", "cli.js");
+const pkg = JSON.parse(readFileSync(path.join(here, "..", "package.json"), "utf8")) as {
+  version: string;
+};
 
-const run = (...args) =>
+const run = (...args: string[]): string =>
   execFileSync(process.execPath, [bin, ...args], {
     encoding: "utf8",
     env: { ...process.env, VC_NO_UPDATE_CHECK: "1" },
@@ -21,7 +23,10 @@ test("--version 打印 package.json 里的版本并带 beta 标记", () => {
 });
 
 test("version --json 给脚本一行可解析的信息", () => {
-  const body = JSON.parse(run("version", "--json"));
+  const body = JSON.parse(run("version", "--json")) as {
+    ok: boolean;
+    data: { name: string; version: string; channel: string; node: string; os: string };
+  };
   assert.equal(body.ok, true);
   assert.equal(body.data.name, "video-canvas-cli");
   assert.equal(body.data.version, pkg.version);

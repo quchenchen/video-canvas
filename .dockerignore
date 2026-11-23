@@ -1,0 +1,10 @@
+# 构建上下文是仓库根目录（docker build -f backend/Dockerfile .）。
+# 各端的本地依赖都不进上下文；构建产物由各自 Dockerfile 在容器内生成（CLI 例外，见 backend/Dockerfile 注释）。
+cli/node_modules
+web/node_modules
+agent/node_modules
+
+# 项目内 AI 工作数据与本地笔记
+.workbuddy
+docs
+.git

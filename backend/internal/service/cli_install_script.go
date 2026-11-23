@@ -55,9 +55,9 @@ rm -rf "$SHARE"
 mkdir -p "$SHARE" "$BIN"
 cp -R "$TMP/pkg/." "$SHARE/"
 
-# 两个等价命令名都指向同一个入口；Node 解析 ESM 时会沿真实路径找 ../src，软链不影响
-ln -sf "$SHARE/bin/vc.mjs" "$BIN/vc"
-ln -sf "$SHARE/bin/vc.mjs" "$BIN/video-canvas-cli"
+# 两个等价命令名都指向同一个入口；Node 解析 ESM 时会沿真实路径找 ../package.json，软链不影响
+ln -sf "$SHARE/dist/cli.js" "$BIN/vc"
+ln -sf "$SHARE/dist/cli.js" "$BIN/video-canvas-cli"
 
 say "已装好：$("$BIN/vc" --version 2>/dev/null || echo "video-canvas-cli $INSTALLED")"
 case ":$PATH:" in
@@ -121,7 +121,7 @@ if (-not (Test-Path (Join-Path $Lib 'package.json'))) { Fail '安装包不完整
 New-Item -ItemType Directory -Path $BinDir -Force | Out-Null
 $shim = @'
 @echo off
-node "%~dp0..\lib\bin\vc.mjs" %*
+node "%~dp0..\lib\dist\cli.js" %*
 '@
 Set-Content -Path (Join-Path $BinDir 'vc.cmd') -Value $shim -Encoding ASCII
 Copy-Item -Path (Join-Path $BinDir 'vc.cmd') -Destination (Join-Path $BinDir 'video-canvas-cli.cmd') -Force
@@ -136,7 +136,7 @@ if ($parts -notcontains $BinDir) {
 }
 $env:Path = "$BinDir;$env:Path"
 
-Write-Host ('已装好：' + (& node "$Lib\bin\vc.mjs" --version))
+Write-Host ('已装好：' + (& node "$Lib\dist\cli.js" --version))
 Write-Host "下一步：vc login --base $Base"
 `
 

@@ -7,18 +7,35 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
+import type { Canvas } from "../src/types.ts";
+
 const here = path.dirname(fileURLToPath(import.meta.url));
-const bin = path.join(here, "..", "bin", "vc.mjs");
+const bin = path.join(here, "..", "dist", "cli.js");
+
+/** 假站点收到的请求体（结构随用例变化，测试里按需断言）。 */
+type PostBody = Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
+
+interface FakeSite {
+  canvas: Canvas;
+  posts: PostBody[];
+  base: string;
+  close(): Promise<void>;
+}
 
 /**
  * 起一个只会干两件事的假服务：读画布、收节点级改动。
  * 用真实 HTTP，是为了验证 CLI 发的请求体（ops / revision / deleteNodeIds）真的对。
  */
-async function fakeSite() {
-  const state = { canvas: null, posts: [] };
+async function fakeSite(): Promise<FakeSite> {
+  const state: FakeSite = {
+    canvas: {} as Canvas,
+    posts: [],
+    base: "",
+    close: async () => {},
+  };
   const server = http.createServer((req, res) => {
-    const url = new URL(req.url, "http://x");
-    const send = (body, status = 200) => {
+    const url = new URL(req.url ?? "/", "http://x");
+    const send = (body: unknown, status = 200): void => {
       res.writeHead(status, { "content-type": "application/json" });
       res.end(JSON.stringify(body));
     };
@@ -29,7 +46,7 @@ async function fakeSite() {
       let raw = "";
       req.on("data", (c) => (raw += c));
       req.on("end", () => {
-        state.posts.push(JSON.parse(raw));
+        state.posts.push(JSON.parse(raw) as PostBody);
         send({
           code: 0,
           data: {
@@ -45,14 +62,15 @@ async function fakeSite() {
     }
     return send({ code: 404, msg: "not found" }, 404);
   });
-  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
-  const { port } = server.address();
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const addr = server.address();
+  const port = typeof addr === "object" && addr ? addr.port : 0;
   state.base = `http://127.0.0.1:${port}`;
   // fetch 会复用 keep-alive 连接；不主动断开的话 server.close 等不到回调，测试进程会挂住。
   state.close = () =>
-    new Promise((resolve) => {
+    new Promise<void>((resolve) => {
       server.closeAllConnections?.();
-      server.close(resolve);
+      server.close(() => resolve());
     });
   state.canvas = {
     id: "c1",
@@ -70,7 +88,7 @@ async function fakeSite() {
 }
 
 /** 独立配置目录里塞一份指向假服务的凭据，不碰真实登录态。 */
-function tempConfig(base) {
+function tempConfig(base: string): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "vc-node-"));
   fs.mkdirSync(path.join(dir, "video-canvas"), { recursive: true });
   fs.writeFileSync(
@@ -80,7 +98,13 @@ function tempConfig(base) {
   return dir;
 }
 
-function run(args, env) {
+interface RunResult {
+  code: number | null;
+  stdout: string;
+  stderr: string;
+}
+
+function run(args: string[], env: Record<string, string>): RunResult {
   const result = spawnSync(process.execPath, [bin, ...args], {
     encoding: "utf8",
     env: { ...process.env, VC_NO_UPDATE_CHECK: "1", ...env },
@@ -90,7 +114,11 @@ function run(args, env) {
 }
 
 /** 用伪终端跑一次，模拟真人敲 yes/no；没有 python3 就跳过（pty 只有它能造）。 */
-function runInPty(args, env, input) {
+function runInPty(
+  args: string[],
+  env: Record<string, string>,
+  input: string,
+): Promise<{ code: number | null; out: string }> {
   const helper = path.join(here, "helpers", "pty_run.py");
   // 必须异步：假服务跑在本进程里，spawnSync 会把事件循环卡住，HTTP 请求永远等不到响应。
   return new Promise((resolve) => {
@@ -98,8 +126,8 @@ function runInPty(args, env, input) {
       env: { ...process.env, VC_NO_UPDATE_CHECK: "1", PTY_INPUT: input, ...env },
     });
     let out = "";
-    child.stdout.on("data", (c) => (out += c));
-    child.stderr.on("data", (c) => (out += c));
+    child.stdout.on("data", (c: Buffer) => (out += c.toString()));
+    child.stderr.on("data", (c: Buffer) => (out += c.toString()));
     child.on("close", (code) => resolve({ code, out }));
   });
 }
@@ -179,7 +207,7 @@ test(
       assert.equal(code, 0);
       assert.match(out, /已保存，版本 4/);
       assert.equal(site.posts.length, 1);
-      const body = site.posts[0];
+      const body = site.posts[0] as PostBody;
       assert.equal(body.revision, 3, "必须用确认时看到的版本提交");
       assert.equal(body.ops[0].op, "create_node");
       assert.equal(body.ops[0].kind, "script");
@@ -212,7 +240,7 @@ test(
   async () => {
     const site = await fakeSite();
     try {
-      site.canvas.payload_json.nodes.push({
+      site.canvas.payload_json?.nodes?.push({
         id: "n_sb",
         type: "canvas",
         data: { kind: "storyboard", storyboard: { shots: [{ scene: "a", videoNodeId: "n_v" }] } },
@@ -221,7 +249,7 @@ test(
       const { out } = await runInPty(["canvas", "node", "rm", "c1", "n_v"], env, "yes");
       assert.match(out, /同时删除 1 条连线/);
       assert.match(out, /同时清掉 1 处分镜 \/ 成片引用/);
-      assert.deepEqual(site.posts[0].deleteNodeIds, ["n_v"]);
+      assert.deepEqual((site.posts[0] as PostBody).deleteNodeIds, ["n_v"]);
     } finally {
       await site.close();
     }

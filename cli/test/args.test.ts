@@ -7,14 +7,21 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { APIError } from "../src/client.mjs";
-import { parseArgs, stringFlag, toInt } from "../src/commands.mjs";
+import { APIError } from "../src/client.ts";
+import { parseArgs, stringFlag, toInt } from "../src/commands.ts";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const bin = path.join(here, "..", "bin", "vc.mjs");
+// 测的是构建产物：用户装到的就是 dist/cli.js
+const bin = path.join(here, "..", "dist", "cli.js");
+
+interface RunResult {
+  code: number | null;
+  stdout: string;
+  stderr: string;
+}
 
 /** 跑一次 CLI，返回退出码与两个流；不抛异常，方便断言错误路径。 */
-function run(args, env = {}) {
+function run(args: string[], env: Record<string, string> = {}): RunResult {
   const result = spawnSync(process.execPath, [bin, ...args], {
     encoding: "utf8",
     env: { ...process.env, VC_NO_UPDATE_CHECK: "1", ...env },
@@ -25,29 +32,39 @@ function run(args, env = {}) {
 /**
  * 异步版：本地假服务需要和 CLI 并发跑，spawnSync 会卡住事件循环。
  */
-function runAsync(args, env = {}) {
+function runAsync(args: string[], env: Record<string, string> = {}): Promise<RunResult> {
   return new Promise((resolve) => {
     execFile(
       process.execPath,
       [bin, ...args],
       { encoding: "utf8", env: { ...process.env, VC_NO_UPDATE_CHECK: "1", ...env } },
-      (err, stdout, stderr) => resolve({ code: err ? err.code : 0, stdout, stderr }),
+      (err, stdout, stderr) =>
+        resolve({
+          code: err ? Number(err.code ?? 1) : 0,
+          stdout: String(stdout),
+          stderr: String(stderr),
+        }),
     );
   });
 }
 
 /** 起一个只回固定任务的假服务，避免测试碰真站点、烧积分。 */
-async function startTaskServer(task) {
+async function startTaskServer(task: Record<string, unknown>): Promise<{
+  server: http.Server;
+  base: string;
+}> {
   const server = http.createServer((req, res) => {
     res.writeHead(200, { "content-type": "application/json" });
     res.end(JSON.stringify({ code: 0, msg: "success", data: task }));
   });
-  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
-  return { server, base: `http://127.0.0.1:${server.address().port}` };
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const addr = server.address();
+  const port = typeof addr === "object" && addr ? addr.port : 0;
+  return { server, base: `http://127.0.0.1:${port}` };
 }
 
 /** 隔离的凭据目录，base 指向必然连不上的本地端口——只测参数与本地校验，不发真请求。 */
-function tempConfig() {
+function tempConfig(): string {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "vc-cli-test-"));
   const dir = path.join(root, "video-canvas");
   fs.mkdirSync(dir, { recursive: true });
@@ -79,24 +96,26 @@ test("parseArgs：未登记的短选项原样留给 positional（trace 透传）
 });
 
 test("toInt：非数字、布尔、小数、越界都算用法错误", () => {
-  for (const bad of ["abc", true, "1.5", "0", "-1"]) {
+  const badValues: Array<string | true> = ["abc", true, "1.5", "0", "-1"];
+  for (const bad of badValues) {
     assert.throws(
       () => toInt(bad, "timeout", { max: 86400 }),
-      (err) => err instanceof APIError && err.status === 2,
+      (err: unknown) => err instanceof APIError && err.status === 2,
     );
   }
   assert.equal(toInt("600", "timeout", { max: 86400 }), 600);
+  // 数字也认：内部调用会直接给 number
   assert.equal(toInt(30, "interval", { max: 3600 }), 30);
 });
 
 test("stringFlag：没给值或只写开关名时明确报错", () => {
   assert.throws(
     () => stringFlag({}, "payload", "用法"),
-    (err) => err.status === 2,
+    (err: unknown) => err instanceof APIError && err.status === 2,
   );
   assert.throws(
     () => stringFlag({ payload: true }, "payload", "用法"),
-    (err) => err.status === 2,
+    (err: unknown) => err instanceof APIError && err.status === 2,
   );
   assert.equal(stringFlag({ payload: "a.json" }, "payload", "用法"), "a.json");
 });
@@ -183,7 +202,11 @@ test("task wait 到失败终态：JSON 为 ok:false 且退出码 1", async () =>
       VC_API_BASE: base,
     });
     assert.equal(code, 1);
-    const body = JSON.parse(stdout.trim());
+    const body = JSON.parse(stdout.trim()) as {
+      ok: boolean;
+      error: { message: string };
+      data: { status: string };
+    };
     assert.equal(body.ok, false);
     assert.equal(body.error.message, "video queue is full");
     assert.equal(body.data.status, "failed");
@@ -200,7 +223,7 @@ test("task wait 到成功终态：JSON 为 ok:true 且退出码 0", async () => 
       VC_API_BASE: base,
     });
     assert.equal(code, 0);
-    assert.equal(JSON.parse(stdout.trim()).ok, true);
+    assert.equal((JSON.parse(stdout.trim()) as { ok: boolean }).ok, true);
   } finally {
     server.close();
   }

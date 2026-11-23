@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 // video-canvas-cli：连镜的命令行入口。
-// 只依赖 Node 18+ 内置能力，认证走设备授权（RFC 8628 简化版），不存密码。
+// 运行时只依赖 Node 18+ 内置能力；源码是 TypeScript，构建产物是 dist/cli.js。
 
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { APIError, normalizeBase, siteRootOf } from "../src/client.mjs";
+import { APIError, normalizeBase, siteRootOf } from "./client.ts";
 import {
   canvasCompose,
   canvasComposeCancel,
@@ -38,8 +38,9 @@ import {
   taskWait,
   trace,
   whoami,
-} from "../src/commands.mjs";
-import { credentialsPath, loadCredentials } from "../src/config.mjs";
+} from "./commands.ts";
+import { credentialsPath, loadCredentials } from "./config.ts";
+import type { Args, Ctx, Flags } from "./types.ts";
 
 const USAGE = `video-canvas-cli（beta）— 连镜命令行
 
@@ -117,9 +118,9 @@ const USAGE = `video-canvas-cli（beta）— 连镜命令行
 login 的授权地址始终写在 stderr，--json 时也一样——stdout 只留最后一行 JSON。`;
 
 /** 画布子命令。 */
-async function runCanvas(ctx, positional, flags) {
+async function runCanvas(ctx: Ctx, positional: string[], flags: Flags): Promise<void> {
   const [sub, ...rest] = positional;
-  const args = { positional: rest, flags };
+  const args: Args = { positional: rest, flags };
   switch (sub) {
     case "list":
       return canvasList(ctx, args);
@@ -149,9 +150,9 @@ async function runCanvas(ctx, positional, flags) {
 }
 
 /** 节点级编辑子命令：每次都走人工确认，没有跳过确认的开关。 */
-async function runCanvasNode(ctx, positional, flags) {
+async function runCanvasNode(ctx: Ctx, positional: string[], flags: Flags): Promise<void> {
   const [sub, code, ...rest] = positional;
-  const args = { positional: [code, ...rest], flags };
+  const args: Args = { positional: [code as string, ...rest], flags };
   switch (sub) {
     case "add":
       return canvasNodeAdd(ctx, args);
@@ -166,9 +167,9 @@ async function runCanvasNode(ctx, positional, flags) {
 }
 
 /** 生成任务子命令。 */
-async function runTask(ctx, positional, flags) {
+async function runTask(ctx: Ctx, positional: string[], flags: Flags): Promise<void> {
   const [sub, ...rest] = positional;
-  const args = { positional: rest, flags };
+  const args: Args = { positional: rest, flags };
   switch (sub) {
     case "get":
       return taskGet(ctx, args);
@@ -180,9 +181,9 @@ async function runTask(ctx, positional, flags) {
 }
 
 /** 模型子命令。 */
-async function runModel(ctx, positional, flags) {
+async function runModel(ctx: Ctx, positional: string[], flags: Flags): Promise<void> {
   const [sub, ...rest] = positional;
-  const args = { positional: rest, flags };
+  const args: Args = { positional: rest, flags };
   switch (sub) {
     case "list":
       return modelList(ctx, args);
@@ -194,9 +195,9 @@ async function runModel(ctx, positional, flags) {
 }
 
 /** 短剧子命令。 */
-async function runDrama(ctx, positional, flags) {
+async function runDrama(ctx: Ctx, positional: string[], flags: Flags): Promise<void> {
   const [sub, ...rest] = positional;
-  const args = { positional: rest, flags };
+  const args: Args = { positional: rest, flags };
   switch (sub) {
     case "list":
       return dramaList(ctx, args);
@@ -215,11 +216,11 @@ async function runDrama(ctx, positional, flags) {
   }
 }
 
-function buildContext(flags) {
+function buildContext(flags: Flags): Ctx {
   const env = process.env;
   const creds = loadCredentials(env);
-  let base = null;
-  let baseError = null;
+  let base: string | null = null;
+  let baseError: unknown = null;
   try {
     if (flags.base || env.VC_API_BASE || creds?.base) {
       base = normalizeBase(flags.base || env.VC_API_BASE || creds?.base);
@@ -237,13 +238,13 @@ function buildContext(flags) {
     baseError,
     token: creds?.token,
     json: flags.json === true || flags.json === "true",
-    stdout: (line) => process.stdout.write(`${line}\n`),
-    stderr: (line) => process.stderr.write(`${line}\n`),
+    stdout: (line: string) => process.stdout.write(`${line}\n`),
+    stderr: (line: string) => process.stderr.write(`${line}\n`),
     fetchImpl: fetch,
   };
 }
 
-async function main(argv) {
+async function main(argv: string[]): Promise<void> {
   const [command, ...rest] = argv;
   if (!command || command === "help" || command === "-h" || command === "--help") {
     process.stdout.write(`${USAGE}\n`);
@@ -295,9 +296,9 @@ async function main(argv) {
       case "generate":
         return await generate(ctx, { positional, flags });
       case "credits":
-        return await credits(ctx, { positional, flags });
+        return await credits(ctx);
       case "trace":
-        return await trace(ctx, { positional, flags });
+        return trace(ctx, { positional, flags });
       default:
         throw new APIError(-1, `未知命令：${command}\n\n${USAGE}`, 2);
     }
@@ -313,10 +314,10 @@ async function main(argv) {
 const CLI_CHANNEL = "beta";
 
 /** 语义化版本比较：a 比 b 新返回 true。beta 期间只比前三段数字，预发布后缀按同版本处理。 */
-function isNewer(a, b) {
-  const parse = (value) =>
+function isNewer(a: string, b: string): boolean {
+  const parse = (value: string): number[] =>
     String(value)
-      .split("-")[0]
+      .split("-")[0]!
       .split(".")
       .map((part) => Number.parseInt(part, 10) || 0);
   const left = parse(a);
@@ -325,6 +326,10 @@ function isNewer(a, b) {
     if ((left[i] || 0) !== (right[i] || 0)) return (left[i] || 0) > (right[i] || 0);
   }
   return false;
+}
+
+interface Updater {
+  finish(): Promise<void>;
 }
 
 /**
@@ -336,7 +341,7 @@ function isNewer(a, b) {
  * - --json 时提示仍走 stderr，不影响 stdout 的单行 JSON；
  * - VC_NO_UPDATE_CHECK=1 或 --no-update-check 可彻底关掉。
  */
-function startUpdateCheck(ctx, argv) {
+function startUpdateCheck(ctx: Ctx, argv: string[]): Updater {
   const skip =
     process.env.VC_NO_UPDATE_CHECK === "1" ||
     argv.includes("--no-update-check") ||
@@ -344,25 +349,26 @@ function startUpdateCheck(ctx, argv) {
     !process.stderr.isTTY;
   if (skip) return { finish: async () => {} };
 
+  const base = ctx.base as string;
   const local = cliVersion();
-  const pending = fetch(`${ctx.base}/cli/release`, {
+  const pending: Promise<string | null> = fetch(`${base}/cli/release`, {
     headers: { accept: "application/json" },
     signal: AbortSignal.timeout(1500),
   })
-    .then((res) => (res.ok ? res.json() : null))
-    .then((body) => (body && body.data && body.data.version) || null)
+    .then((res) => (res.ok ? (res.json() as Promise<{ data?: { version?: string } }>) : null))
+    .then((body) => body?.data?.version || null)
     .catch(() => null);
 
   return {
     finish: async () => {
-      const timeout = new Promise((resolve) => {
+      const timeout = new Promise<null>((resolve) => {
         const timer = setTimeout(() => resolve(null), 400);
         // 不要因为这条提示把进程多留 400ms
         if (typeof timer.unref === "function") timer.unref();
       });
       const latest = await Promise.race([pending, timeout]);
       if (!latest || !isNewer(String(latest), local)) return;
-      const site = siteRootOf(ctx.base);
+      const site = siteRootOf(base);
       const how =
         process.platform === "win32"
           ? `irm ${site}/api/v1/cli/install.ps1 | iex`
@@ -379,12 +385,14 @@ function startUpdateCheck(ctx, argv) {
 /**
  * CLI 自己的版本号，与站点版本无关：命令行可以单独发版、单独修 bug。
  * 安装包会把 package.json 一起带上，所以装完之后读到的就是安装时的那个版本。
+ *
+ * 源码在 src/、产物在 dist/，两种位置的上一级都是 cli/（package.json 所在）。
  */
-function cliVersion() {
+function cliVersion(): string {
   try {
     const here = path.dirname(fileURLToPath(import.meta.url));
     const raw = fs.readFileSync(path.join(here, "..", "package.json"), "utf8");
-    const parsed = JSON.parse(raw);
+    const parsed = JSON.parse(raw) as { version?: string };
     return typeof parsed.version === "string" && parsed.version ? parsed.version : "0.0.0";
   } catch {
     // 源码被单独拷走、package.json 不在旁边：不报错，给一个显然不是正式版的值
@@ -394,7 +402,7 @@ function cliVersion() {
 
 const wantsJson = process.argv.slice(2).some((arg) => arg === "--json" || arg === "--json=true");
 
-main(process.argv.slice(2)).catch((err) => {
+main(process.argv.slice(2)).catch((err: unknown) => {
   if (err instanceof APIError) {
     if (wantsJson) {
       process.stdout.write(
@@ -407,12 +415,11 @@ main(process.argv.slice(2)).catch((err) => {
     process.exitCode = err.exitCode ?? (err.status === 2 ? 2 : 1);
     return;
   }
+  const message = err instanceof Error ? err.message : String(err);
   if (wantsJson) {
-    process.stdout.write(
-      `${JSON.stringify({ ok: false, error: { code: -1, message: String(err?.message || err) } })}\n`,
-    );
+    process.stdout.write(`${JSON.stringify({ ok: false, error: { code: -1, message } })}\n`);
   } else {
-    process.stderr.write(`错误：${err?.stack || err}\n`);
+    process.stderr.write(`错误：${err instanceof Error ? err.stack : message}\n`);
   }
   process.exitCode = 1;
 });

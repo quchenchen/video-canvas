@@ -27,7 +27,7 @@ import { cliApiBase, cliSiteRoot } from "@/utils/cli/api-base";
  *
  * 刻意不复用 MCP 接入页：两者是平行的两种接入方式，凭据形态、授权动作、
  * 失效方式都不同，混在一页里会让人以为 CLI 要拿 MCP 令牌。
- * 页面里的命令与参数都对着 cli/bin/vc.mjs --help 写，改 CLI 时这里要一起改。
+ * 页面里的命令与参数都对着 cli/src/cli.ts 的 USAGE 写，改 CLI 时这里要一起改。
  */
 export default function CLIPage() {
   // 站点与接口地址都在运行时算：换域名、换端口、把 API 挂在别的域上都自动跟着变，
@@ -44,7 +44,7 @@ curl -fsSL ${siteRoot}/api/v1/cli/install.sh | sh`;
   const installWindows = `# Windows PowerShell：装到 %LOCALAPPDATA%，并写入用户 PATH
 irm ${siteRoot}/api/v1/cli/install.ps1 | iex`;
 
-  const installManual = `# 不想执行脚本就手动下包（解压后 node <目录>/bin/vc.mjs 即可运行）
+  const installManual = `# 不想执行脚本就手动下包（解压后 node <目录>/dist/cli.js 即可运行）
 curl -fsSL ${siteRoot}/api/v1/cli/download?os=unix -o video-canvas-cli.tgz   # macOS / Linux
 curl -fsSL ${siteRoot}/api/v1/cli/download?os=windows -o video-canvas-cli.zip # Windows`;
 

@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { APIError, normalizeBase, request, siteRootOf } from "../src/client.mjs";
-import { parseArgs } from "../src/commands.mjs";
+import { APIError, normalizeBase, request, siteRootOf } from "../src/client.ts";
+import { parseArgs } from "../src/commands.ts";
 
 test("normalizeBase：只给站点根时补 /api/v1，末尾斜杠去掉", () => {
   assert.equal(normalizeBase("https://example.com"), "https://example.com/api/v1");
@@ -36,33 +36,34 @@ test("parseArgs：带值与布尔开关、= 写法都识别", () => {
 });
 
 test("request：成功时返回 data", async () => {
-  const fake = async () =>
+  const fake: typeof fetch = async () =>
     new Response(JSON.stringify({ code: 0, msg: "success", data: { id: "x" } }), { status: 200 });
   const data = await request({ base: "https://h/api/v1", path: "/canvas", fetchImpl: fake });
   assert.deepEqual(data, { id: "x" });
 });
 
 test("request：code 非 0 时抛 APIError，带后端文案", async () => {
-  const fake = async () =>
+  const fake: typeof fetch = async () =>
     new Response(JSON.stringify({ code: 30001, msg: "画布不存在" }), { status: 404 });
   await assert.rejects(
     () => request({ base: "https://h/api/v1", path: "/canvas/x", fetchImpl: fake }),
-    (err) => err instanceof APIError && err.code === 30001 && err.message === "画布不存在",
+    (err: unknown) => err instanceof APIError && err.code === 30001 && err.message === "画布不存在",
   );
 });
 
 test("request：401 提示重新登录", async () => {
-  const fake = async () => new Response(JSON.stringify({ code: 20003, msg: "x" }), { status: 401 });
+  const fake: typeof fetch = async () =>
+    new Response(JSON.stringify({ code: 20003, msg: "x" }), { status: 401 });
   await assert.rejects(
     () => request({ base: "https://h/api/v1", path: "/me", fetchImpl: fake }),
-    (err) => err instanceof APIError && /重新执行/.test(err.message),
+    (err: unknown) => err instanceof APIError && /重新执行/.test(err.message),
   );
 });
 
 test("request：查询参数拼进 URL", async () => {
   let seen = "";
-  const fake = async (url) => {
-    seen = String(url);
+  const fake: typeof fetch = async (input) => {
+    seen = String(input);
     return new Response(JSON.stringify({ code: 0, data: [] }), { status: 200 });
   };
   await request({

@@ -7,11 +7,17 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
+import { parseArgs } from "../src/commands.ts";
+import type { Graph } from "../src/types.ts";
+
 // 生成 / 合成 / 短剧三类命令的请求体与输出：用真实 HTTP 的假站点，
 // 断言的是「CLI 实际发了什么」，而不是「代码看起来像是对的」。
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const bin = path.join(here, "..", "bin", "vc.mjs");
+const bin = path.join(here, "..", "dist", "cli.js");
+
+/** 测试里断言的 JSON 体：结构随用例变，不在这里逐一建模。 */
+type Json = Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
 
 const MODELS = [
   {
@@ -37,21 +43,39 @@ const MODELS = [
   },
 ];
 
-async function fakeSite() {
-  const state = { posts: [], headers: [], polls: 0, task: null, compose: null };
-  const send = (res, body, status = 200) => {
+interface FakeSite {
+  posts: Json[];
+  headers: Json[];
+  polls: number;
+  task: Json | null;
+  compose: Json | null;
+  base: string;
+  close(): Promise<void>;
+}
+
+async function fakeSite(): Promise<FakeSite> {
+  const state: FakeSite = {
+    posts: [],
+    headers: [],
+    polls: 0,
+    task: null,
+    compose: null,
+    base: "",
+    close: async () => {},
+  };
+  const send = (res: http.ServerResponse, body: unknown, status = 200): void => {
     res.writeHead(status, { "content-type": "application/json" });
     res.end(JSON.stringify(body));
   };
-  const readBody = (req) =>
+  const readBody = (req: http.IncomingMessage): Promise<Json> =>
     new Promise((resolve) => {
       let raw = "";
-      req.on("data", (c) => (raw += c));
-      req.on("end", () => resolve(raw ? JSON.parse(raw) : {}));
+      req.on("data", (c: Buffer) => (raw += c.toString()));
+      req.on("end", () => resolve(raw ? (JSON.parse(raw) as Json) : {}));
     });
 
   const server = http.createServer(async (req, res) => {
-    const url = new URL(req.url, "http://x");
+    const url = new URL(req.url ?? "/", "http://x");
     const p = url.pathname;
 
     if (req.method === "GET" && p === "/api/v1/models") {
@@ -65,7 +89,7 @@ async function fakeSite() {
       const body = await readBody(req);
       state.posts.push(body);
       state.headers.push({ idempotency: req.headers["idempotency-key"] });
-      const count = (body.node_ids || [body.node_id]).filter(Boolean).length || 1;
+      const count = ((body.node_ids as unknown[]) || [body.node_id]).filter(Boolean).length || 1;
       const items = Array.from({ length: count }, (_, i) => ({
         node_id: body.node_id || "",
         task: {
@@ -230,19 +254,21 @@ async function fakeSite() {
     return send(res, { code: 404, msg: "not found" }, 404);
   });
 
-  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
-  state.base = `http://127.0.0.1:${server.address().port}`;
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const addr = server.address();
+  const port = typeof addr === "object" && addr ? addr.port : 0;
+  state.base = `http://127.0.0.1:${port}`;
   state.close = () =>
-    new Promise((resolve) => {
+    new Promise<void>((resolve) => {
       server.closeAllConnections?.();
-      server.close(resolve);
+      server.close(() => resolve());
     });
   return state;
 }
 
 // 成片节点连了三个上游：两个视频（v1 在 v2 上面）与一个图片；composeOrder 把 v2 提到前面，
 // v1 走 activeOutputId → outputs 里那一版（111），而不是老字段 assetId（101）。
-const GRAPH = {
+const GRAPH: Graph = {
   nodes: [
     {
       id: "v1",
@@ -282,7 +308,7 @@ const GRAPH = {
   ],
 };
 
-function tempConfig(base) {
+function tempConfig(base: string): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "vc-gen-"));
   fs.mkdirSync(path.join(dir, "video-canvas"), { recursive: true });
   fs.writeFileSync(
@@ -292,21 +318,27 @@ function tempConfig(base) {
   return dir;
 }
 
+interface RunResult {
+  code: number | null;
+  stdout: string;
+  stderr: string;
+}
+
 /** 一律异步：假服务跑在本进程里，spawnSync 会把事件循环卡住，请求永远等不到响应。 */
-function run(args, env) {
+function run(args: string[], env: Record<string, string>): Promise<RunResult> {
   return runAsync(args, env);
 }
 
 /** 要等终态的命令必须异步跑：假服务在本进程里，spawnSync 会把事件循环卡死。 */
-function runAsync(args, env) {
+function runAsync(args: string[], env: Record<string, string>): Promise<RunResult> {
   return new Promise((resolve) => {
     const child = spawn(process.execPath, [bin, ...args], {
       env: { ...process.env, VC_NO_UPDATE_CHECK: "1", ...env },
     });
     let stdout = "";
     let stderr = "";
-    child.stdout.on("data", (c) => (stdout += c));
-    child.stderr.on("data", (c) => (stderr += c));
+    child.stdout.on("data", (c: Buffer) => (stdout += c.toString()));
+    child.stderr.on("data", (c: Buffer) => (stderr += c.toString()));
     child.on("close", (code) => resolve({ code, stdout, stderr }));
   });
 }
@@ -322,7 +354,7 @@ test("model list：按种类过滤并打印表头", async () => {
     assert.match(all.stdout, /agnes-video/);
 
     const onlyVideo = await run(["model", "list", "--kind", "video", "--json"], env);
-    const body = JSON.parse(onlyVideo.stdout);
+    const body = JSON.parse(onlyVideo.stdout) as { ok: boolean; data: Array<{ key: string }> };
     assert.equal(body.ok, true);
     assert.deepEqual(
       body.data.map((m) => m.key),
@@ -391,7 +423,7 @@ test("generate：prompt / param / 参考素材合成 input，count 落成 node_i
     );
     assert.equal(code, 0, stdout);
     assert.equal(site.posts.length, 1);
-    const body = site.posts[0];
+    const body = site.posts[0] as Json;
     assert.equal(body.kind, "video");
     assert.equal(body.model_id, "agnes-video");
     assert.equal(body.canvas_id, "c1");
@@ -400,7 +432,7 @@ test("generate：prompt / param / 参考素材合成 input，count 落成 node_i
     assert.equal(body.input.duration, 5, "数字参数要按 JSON 解释成数字");
     assert.equal(body.input.motion, "strong", "解析不出来的按字符串");
     assert.deepEqual(body.input.images, ["101", "102"]);
-    assert.ok(site.headers[0].idempotency, "必须带 Idempotency-Key");
+    assert.ok(site.headers[0]?.idempotency, "必须带 Idempotency-Key");
     assert.match(stdout, /任务 t500/);
     assert.match(stdout, /冻结 5 积分/);
   } finally {
@@ -496,7 +528,7 @@ test("generate --wait：任务失败时 ok:false 且退出码 1", async () => {
       env,
     );
     assert.equal(code, 1);
-    const body = JSON.parse(stdout);
+    const body = JSON.parse(stdout) as { ok: boolean; error: { message: string } };
     assert.equal(body.ok, false);
     assert.match(body.error.message, /上游超时/);
   } finally {
@@ -511,6 +543,7 @@ test("canvas compose：不给 --assets 时按 composeOrder + 位置推导，并�
     const { code, stdout } = await run(["canvas", "compose", "c1", "--node", "c_node"], env);
     assert.equal(code, 0, stdout);
     const body = site.posts.find((item) => Array.isArray(item.asset_ids));
+    assert.ok(body, "必须发出合成请求");
     assert.deepEqual(
       body.asset_ids,
       ["202", "111"],
@@ -546,6 +579,7 @@ test("canvas compose：显式 --assets 优先，不再读画布", async () => {
     );
     assert.equal(code, 0);
     const body = site.posts.find((item) => Array.isArray(item.asset_ids));
+    assert.ok(body, "必须发出合成请求");
     assert.deepEqual(body.asset_ids, ["7", "8"]);
     assert.deepEqual(body.seqs, [0, 1]);
     assert.equal(body.mode, "storyboard");
@@ -637,8 +671,7 @@ test("drama：列表、详情、单元、任务四条都是只读", async () => 
   }
 });
 
-test("parseArgs：多值 flag 收成数组，单值 flag 仍然后者生效", async () => {
-  const { parseArgs } = await import("../src/commands.mjs");
+test("parseArgs：多值 flag 收成数组，单值 flag 仍然后者生效", () => {
   const { flags } = parseArgs([
     "--param",
     "a=1",
@@ -658,15 +691,19 @@ test("parseArgs：多值 flag 收成数组，单值 flag 仍然后者生效", as
 // ---------------------------------------------------------------------------
 
 /** 用伪终端跑一次，模拟真人敲 yes / no（借 python3 造 pty，与 node-ops 同一套办法）。 */
-function runInPty(args, env, input) {
+function runInPty(
+  args: string[],
+  env: Record<string, string>,
+  input: string,
+): Promise<{ code: number | null; out: string }> {
   const helper = path.join(here, "helpers", "pty_run.py");
   return new Promise((resolve) => {
     const child = spawn("python3", [helper, process.execPath, bin, ...args], {
       env: { ...process.env, VC_NO_UPDATE_CHECK: "1", PTY_INPUT: input, ...env },
     });
     let out = "";
-    child.stdout.on("data", (c) => (out += c));
-    child.stderr.on("data", (c) => (out += c));
+    child.stdout.on("data", (c: Buffer) => (out += c.toString()));
+    child.stderr.on("data", (c: Buffer) => (out += c.toString()));
     child.on("close", (code) => resolve({ code, out }));
   });
 }
@@ -712,7 +749,7 @@ test("canvas create：终端里输入 yes 才建，并把标题传给服务端",
     assert.match(out, /将新建画布/);
     assert.match(out, /已创建：确认过的画布/);
     assert.equal(site.posts.length, 1);
-    assert.equal(site.posts[0].title, "确认过的画布");
+    assert.equal((site.posts[0] as Json).title, "确认过的画布");
   } finally {
     await site.close();
   }
@@ -753,7 +790,7 @@ test("canvas import：确认后按导出文档新建，并把文档原样传给�
     assert.equal(code, 0, out);
     assert.match(out, /被导入的画布/);
     assert.equal(site.posts.length, 1);
-    assert.equal(site.posts[0].document.canvas.title, "被导入的画布");
+    assert.equal((site.posts[0] as Json).document.canvas.title, "被导入的画布");
   } finally {
     await site.close();
   }

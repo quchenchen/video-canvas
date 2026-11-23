@@ -108,20 +108,25 @@ func locateCLIDir(dir string) string {
 }
 
 // cliPackagedFiles 收集要打进包的文件：只有运行需要的那几项。
-// 测试与 .oxlintrc 之类不进包，装完的目录就是「够跑」的最小集合。
+//
+// 源码是 TypeScript（cli/src/*.ts），安装包里放的是 tsc 的产物（cli/dist/*.js）：
+// 用户机器只需要 Node，不需要 TypeScript 或任何构建步骤。测试、node_modules、
+// 构建配置都不进包，装完的目录就是「够跑」的最小集合。
+//
+// dist 缺失时返回空列表——宁可让接口报 501（并打日志），也不能下发一个没有代码的包：
+// 装出来的 vc 会在第一次调用时莫名其妙地找不到命令。
 func cliPackagedFiles(root string) []string {
 	keep := func(rel string) bool {
 		switch {
 		case rel == "package.json", rel == "README.md":
 			return true
-		case strings.HasPrefix(rel, "bin"+string(filepath.Separator)),
-			strings.HasPrefix(rel, "src"+string(filepath.Separator)):
+		case strings.HasPrefix(rel, "dist"+string(filepath.Separator)):
 			return true
 		}
 		return false
 	}
 	var out []string
-	for _, dir := range []string{"bin", "src"} {
+	for _, dir := range []string{"dist"} {
 		_ = filepath.WalkDir(filepath.Join(root, dir), func(p string, d fs.DirEntry, err error) error {
 			if err != nil || d.IsDir() {
 				return nil //nolint:nilerr // 缺目录就当没有：打包时按现有文件来
@@ -133,6 +138,10 @@ func cliPackagedFiles(root string) []string {
 			out = append(out, rel)
 			return nil
 		})
+	}
+	if _, err := os.Stat(filepath.Join(root, "dist", "cli.js")); err != nil {
+		// 没有入口文件：当成「没有可发布的命令行」，而不是发一个残缺包
+		return nil
 	}
 	for _, name := range []string{"package.json", "README.md"} {
 		if _, err := os.Stat(filepath.Join(root, name)); err == nil {
@@ -233,7 +242,7 @@ func (s *CLIReleaseService) Package(osName string) (name string, data []byte, er
 	return pkg.name, pkg.data, nil
 }
 
-// build 按平台产出 tar.gz 或 zip。包内是扁平结构（package.json、bin/、src/），解包即用。
+// build 按平台产出 tar.gz 或 zip。包内是扁平结构（package.json、dist/），解包即用。
 func (s *CLIReleaseService) build(osName, version string) (cliPackage, error) {
 	entries, err := s.entries()
 	if err != nil {
@@ -266,15 +275,15 @@ func (s *CLIReleaseService) entries() ([]cliEntry, error) {
 	}
 	out := make([]cliEntry, 0, len(s.files))
 	for _, rel := range s.files {
-		// 路径来自 cliPackagedFiles 的白名单（cli 目录下的 bin/ 与 src/），不是请求参数
+		// 路径来自 cliPackagedFiles 的白名单（cli 目录下的 dist/ 与 package.json），不是请求参数
 		//nolint:gosec // G304: 输入是启动时算好的白名单，不接受外部路径
 		body, err := os.ReadFile(filepath.Join(s.root, rel))
 		if err != nil {
 			return nil, fmt.Errorf("读取 %s 失败: %w", rel, err)
 		}
 		mode := fs.FileMode(0o644)
-		// bin/ 下的入口要可执行：Unix 上靠 shebang 直接跑
-		if strings.HasPrefix(rel, "bin"+string(filepath.Separator)) {
+		// 入口要可执行：Unix 上靠 shebang 直接跑（dist/cli.js 的第一行是 #!/usr/bin/env node）
+		if rel == filepath.Join("dist", "cli.js") {
 			mode = 0o755
 		}
 		out = append(out, cliEntry{rel: filepath.ToSlash(rel), mode: mode, body: body})
