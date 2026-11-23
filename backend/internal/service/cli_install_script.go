@@ -24,8 +24,12 @@ say() { printf '%s\n' "$*"; }
 die() { printf '错误：%s\n' "$*" >&2; exit 1; }
 
 command -v node >/dev/null 2>&1 || die "需要 Node.js 18 或更高版本，见 https://nodejs.org/zh-cn/download"
+# 找到 node 不等于能用：二进制与系统 glibc 不匹配时，命令存在但一执行就报错。
+# 这种情况必须单独说清，否则「版本过低」会把人引去升级 Node，升完照样跑不动。
+NODE_VERSION=$(node -v 2>/dev/null) \
+  || die "找到了 node（$(command -v node)）但无法执行：可能是二进制与系统库不匹配，请换一个能在本机运行的 Node 18+"
 node -e 'process.exit(Number(process.versions.node.split(".")[0]) >= 18 ? 0 : 1)' \
-  || die "Node.js 版本过低（当前 $(node -v)），需要 18 或更高"
+  || die "Node.js 版本过低（当前 ${NODE_VERSION}），需要 18 或更高"
 
 # 版本以服务端为准：脚本不写死版本，升级重跑同一条命令即可
 VERSION="${VC_VERSION:-}"
@@ -84,8 +88,12 @@ function Fail($message) { throw "错误：$message" }
 
 $node = Get-Command node -ErrorAction SilentlyContinue
 if (-not $node) { Fail '需要 Node.js 18 或更高版本，见 https://nodejs.org/zh-cn/download' }
-node -e "process.exit(Number(process.versions.node.split('.')[0]) >= 18 ? 0 : 1)"
-if ($LASTEXITCODE -ne 0) { Fail "Node.js 版本过低（当前 $(node -v)），需要 18 或更高" }
+$nodeVersion = & node -v 2>$null
+if ($LASTEXITCODE -ne 0 -or -not $nodeVersion) {
+  Fail "找到了 node（$($node.Source)）但无法执行，请换一个能在本机运行的 Node 18+"
+}
+& node -e "process.exit(Number(process.versions.node.split('.')[0]) >= 18 ? 0 : 1)"
+if ($LASTEXITCODE -ne 0) { Fail "Node.js 版本过低（当前 ${nodeVersion}），需要 18 或更高" }
 
 $Version = $env:VC_VERSION
 if (-not $Version) {
