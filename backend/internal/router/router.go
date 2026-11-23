@@ -34,6 +34,9 @@ type Handlers struct {
 	// Agent 技能：用户端目录 + 管理端导入 / 版本 / 启停
 	AgentSkill *agenthandler.SkillHandler
 
+	// 命令行设备授权：CLI 申请短码 → 用户在网页确认 → 轮询换 JWT
+	CLIDevice *handler.CLIDeviceHandler
+
 	// Agent 运行观测：后台只读查看与导出、分析令牌
 	AgentObserve  *agenthandler.AgentObserveHandler // 后台运行记录（只读）和分析令牌管理
 	AnalysisToken middleware.TokenAuthenticator     // 校验分析令牌，本地 agent-trace 用它只读拉取运行记录
@@ -94,6 +97,9 @@ func New(mode, jwtSecret string, h Handlers) *gin.Engine {
 		v1.POST("/auth/register/code", h.User.SendRegisterCode)
 		v1.POST("/auth/register", h.User.Register)
 		v1.POST("/auth/login", h.User.Login)
+		// 命令行登录：设备授权（RFC 8628 简化版）。申请与轮询发生在拿到令牌之前，不能要求登录态。
+		v1.POST("/auth/cli/device", h.CLIDevice.Start)
+		v1.POST("/auth/cli/token", h.CLIDevice.Poll)
 		v1.GET("/showcase", h.Showcase.Public) // 登录页背景轮播：未登录即可读取，只暴露播放所需字段
 
 		// 支付渠道的异步通知：渠道服务器调用，不带 JWT，身份由渠道的签名保证；GET（易支付）和 POST（其余）都要接
@@ -119,6 +125,11 @@ func New(mode, jwtSecret string, h Handlers) *gin.Engine {
 
 		// 首页公告：生效中的公告，最多 5 条，全站共享；只在登录后的首页外壳展示，所以要登录
 		auth.GET("/announcements", h.Announcement.Public)
+
+		// CLI 设备授权的确认页：要认当前登录用户，未登录会被 middleware 挡回 401。
+		auth.GET("/auth/cli/device", h.CLIDevice.Describe) // ?code=ABCD-EFGH
+		auth.POST("/auth/cli/device/approve", h.CLIDevice.Approve)
+		auth.POST("/auth/cli/device/deny", h.CLIDevice.Deny)
 
 		// 个人中心：只操作当前登录用户自己的数据
 		me := auth.Group("/me")

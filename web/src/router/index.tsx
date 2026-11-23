@@ -112,6 +112,11 @@ export const router = createBrowserRouter([
         element: <RequireAuth />,
         children: [
           {
+            /** 命令行登录的授权页：全屏，不带首页侧栏 */
+            path: "cli/authorize",
+            element: <CLIAuthorize />,
+          },
+          {
             /** 首页和所有画布共用侧栏 + 顶栏 */
             element: <HomeLayout />,
             children: [
