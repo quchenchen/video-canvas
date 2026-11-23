@@ -96,6 +96,9 @@ func NewApp(cfg *config.Config) (*App, error) {
 	cliDeviceSvc := service.NewCLIDeviceService(service.CLIDeviceDeps{
 		Repo: repository.NewCLIDeviceRepository(db), Users: userRepo, Issuer: userSvc,
 	})
+	// 命令行发行：安装包从 cli/ 目录现场打包，版本取自 cli/package.json（与站点版本无关）。
+	// APP_CLI_DIR 可覆盖目录，镜像里是 /app/cli。
+	cliReleaseSvc := service.NewCLIReleaseService(os.Getenv("APP_CLI_DIR"))
 
 	// 对外 ID 编码：画布 ID 等以十六进制串暴露，库里主键不变
 	idKey := cfg.Server.IDKey
@@ -409,6 +412,7 @@ func NewApp(cfg *config.Config) (*App, error) {
 		Health:          handler.NewHealthHandler(db, rdb),
 		User:            handler.NewUserHandler(userSvc),
 		CLIDevice:       handler.NewCLIDeviceHandler(cliDeviceSvc),
+		CLIRelease:      handler.NewCLIReleaseHandler(cliReleaseSvc),
 		Me:              handler.NewMeHandler(meSvc),
 		CanvasProject:   handler.NewCanvasProjectHandler(canvasProjectSvc),
 		Drama:           handler.NewDramaHandler(dramaSvc),

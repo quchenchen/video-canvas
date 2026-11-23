@@ -46,7 +46,7 @@ export const ADMIN_NAV: AdminNavSection[] = [
       { to: "agent/runs", label: "运行记录", icon: History },
       { to: "agent/tokens", label: "分析令牌", icon: KeyRound },
       { to: "agent/mcp", label: "MCP 接入", icon: Cable },
-      { to: "cli", label: "命令行（CLI）", icon: Terminal },
+      { to: "cli", label: "命令行（CLI）", icon: Terminal, badge: "beta" },
     ],
   },
   {

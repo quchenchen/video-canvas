@@ -1,25 +1,27 @@
-# video-canvas-cli
+# video-canvas-cli（beta）
 
 连镜（video-canvas）的命令行。用设备码登录，不用把密码或长期令牌交给脚本；画布与生成任务的读写都走已有的 HTTP 接口。
+
+**beta 渠道**：相当一段时间内保持测试状态，命令与参数尽量稳定，但输出格式与子命令仍可能调整。
+每次运行会在后台查一次新版本，有更新时在 stderr 提示升级命令（`VC_NO_UPDATE_CHECK=1` 可关掉）。
 
 > 完整参考（安装、5 分钟上手、输出契约、退出码表、排障）在站点 `/cli/docs`，
 > 正文是 `web/src/content/cli-docs.md`，改文档改那一份即可。
 
 ## 安装
 
-仓库内直接运行：
+独立发版，版本看 `package.json`（**与站点版本无关**）。没有发布到 npm，安装包由站点提供：
 
 ```bash
-node cli/bin/vc.mjs --help
+# macOS / Linux：装到 ~/.local，再链接 vc / video-canvas-cli
+curl -fsSL https://你的站点/api/v1/cli/install.sh | sh
+
+# Windows PowerShell：装到 %LOCALAPPDATA% 并写入用户 PATH
+irm https://你的站点/api/v1/cli/install.ps1 | iex
 ```
 
-想用 `video-canvas-cli` / `vc` 两个命令名，在仓库根执行一次：
-
-```bash
-cd cli && npm link
-```
-
-零第三方依赖，Node 18+。
+零第三方依赖，Node 18+。仓库里也能直接跑：`node cli/bin/vc.mjs --help`；
+`vc --version` 打印自己的版本，`vc --version --json` 给脚本读。
 
 ## 登录
 

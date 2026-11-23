@@ -1,8 +1,12 @@
-# 连镜命令行（video-canvas-cli）
+# 连镜命令行（video-canvas-cli）beta
 
 给人和脚本用的命令行：设备码登录，不用把密码或长期令牌交给脚本；画布、生成任务、运行记录都走已有的 HTTP 接口。
 
 零第三方依赖，Node 18+。装好后有两个等价的命令名：`vc` 与 `video-canvas-cli`。
+
+> **beta 渠道**：相当一段时间内保持测试状态。命令名与参数会尽量稳定，但输出格式、提示语、
+> 新增子命令仍可能调整。每次运行会在后台查一次最新版本，有新版本时在 stderr 提示一行升级命令
+> （`--json` 与非交互终端不打扰脚本，`VC_NO_UPDATE_CHECK=1` 或 `--no-update-check` 可彻底关掉）。
 
 ```text
 登录
@@ -31,24 +35,66 @@
 全局选项
   --json          输出一行 JSON（{ok,data} / {ok:false,error}），供脚本与 Agent 解析
   --base URL      覆盖 API 地址（也可用环境变量 VC_API_BASE）
+
+版本
+  version         打印 CLI 版本（与站点版本独立）；加 --json 输出机器可读信息
 ```
 
 ## 安装
 
-从源码装（当前唯一支持的方式）：
+CLI 单独发版，版本号与站点版本**无关**。它没有发布到 npm，安装包由你自己的站点提供，
+需要 Node 18 及以上（脚本会先检查）。
+
+### macOS / Linux
 
 ```bash
-cd cli
-npm link            # 之后可以直接敲 vc / video-canvas-cli
+curl -fsSL https://你的站点/api/v1/cli/install.sh | sh
 ```
 
-不装也能跑：
+装到 `~/.local/share/video-canvas-cli/<版本>`，并链接到 `~/.local/bin/{vc,video-canvas-cli}`。
+`~/.local/bin` 不在 PATH 里时，脚本会打印一行加 PATH 的命令。
+
+### Windows
+
+```powershell
+irm https://你的站点/api/v1/cli/install.ps1 | iex
+```
+
+装到 `%LOCALAPPDATA%\video-canvas-cli\<版本>`：写入 `vc.cmd` / `video-canvas-cli.cmd` 转发到
+node，并把 bin 目录加进用户 PATH（重开终端生效）。
+
+### 手动下载 / 离线
 
 ```bash
-node cli/bin/vc.mjs --help
+curl -fsSL https://你的站点/api/v1/cli/download?os=unix -o video-canvas-cli.tgz     # macOS / Linux
+curl -fsSL https://你的站点/api/v1/cli/download?os=windows -o video-canvas-cli.zip  # Windows
 ```
 
-`npm link` 只是把仓库里的 `bin/vc.mjs` 链到全局 bin，不会联网下载任何东西，升级就是 `git pull`。
+包内就是 `package.json`、`bin/`、`src/`，解压后 `node <目录>/bin/vc.mjs` 直接能跑。
+
+### 可覆盖的参数
+
+| 变量         | 作用                                                   |
+| ------------ | ------------------------------------------------------ |
+| `VC_BASE`    | 站点地址；脚本默认已经填好当前站点                     |
+| `VC_VERSION` | 指定版本，默认取服务端最新                             |
+| `VC_PREFIX`  | Unix 安装前缀（默认 `~/.local`）；Windows 下是安装目录 |
+
+### 升级与卸载
+
+- 升级：重跑同一条安装命令。脚本每次都向 `/api/v1/cli/release` 要最新版本，不用记版本号。
+- 卸载：Unix 删 `~/.local/share/video-canvas-cli` 与 `~/.local/bin/{vc,video-canvas-cli}`；
+  Windows 删 `%LOCALAPPDATA%\video-canvas-cli`，并从用户 PATH 里去掉那条。
+
+### 自检
+
+```bash
+vc --version          # video-canvas-cli 0.1.0
+vc --version --json   # {"ok":true,"data":{...,"node":"v22.22.2","os":"darwin","arch":"x64"}}
+```
+
+`cli/package.json` 的 `version` 是唯一来源：安装包名、`vc --version`、站点 `/cli` 页显示的版本
+都读它，不存在三处各写一个数。源码里也能直接跑：`node cli/bin/vc.mjs --help`。
 
 ## 5 分钟上手
 
@@ -156,7 +202,8 @@ vc logout
 
 - **不做节点级增删改**。CLI 只做整图读写；节点级语义在服务端 `canvas_apply_ops`（Agent 会话/平台桥）那套里，CLI 刻意不复制，避免两套语义各自漂移。
 - **不封装管理端接口**。渠道、模型、用户管理这些管理员操作没有做进 CLI——脚本令牌不应该顺手改平台配置。
-- **未发布到 npm**。随仓库分发，换机器就带仓库过去重装一次。
+- **未发布到 npm**。安装包只由站点通过 `/api/v1/cli/download` 提供，不依赖任何公共包仓库，
+  也不要求 `npm install`；离线环境可以下包后拷过去直接跑。
 - **令牌等同网页登录态**。它和你浏览器里的登录是同一套 JWT：改密码会一起失效，服务端没有单独的吊销列表。
 
 ## 排障
