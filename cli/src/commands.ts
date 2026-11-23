@@ -1851,6 +1851,265 @@ function flagsToArgv(flags: Flags): string[] {
 }
 
 /** 命令表：bin 用它做分发与 help。 */
+// ── 小镜（画布里的 Agent）────────────────────────────────────────────
+// 复杂操作交给它：挑模型、把上游关键帧接成参考图、按画布语义改节点，都由它决定；
+// 需要人拍板的动作它停下来等审批，命令行只负责把条目摊开、把人的决定送回去。
+
+interface AgentSessionView {
+  id: string;
+  canvas_id: string;
+  title: string;
+  mode: string;
+  last_seq: number;
+}
+
+interface AgentRunView {
+  id: string;
+  session_id: string;
+  status: string;
+}
+
+interface AgentEventView {
+  session_id: string;
+  run_id: string | null;
+  seq: number;
+  type: string;
+  data: unknown;
+  created_at: string;
+}
+
+const AGENT_USAGE =
+  'agent run <画布编号> --message "<要它做什么>" [--selection id,id] [--budget 积分] ' +
+  "[--session 会话编号] [--watch] [--interval 2] [--timeout 600]\n" +
+  "      agent events <会话编号> [--after 序号]\n" +
+  "      agent approve <审批编号> [--items 0,1] [--reject] [--answer 文本]\n" +
+  "      agent cancel <运行编号>";
+
+/** 取这个画布的对话；没有就新建一条。同一画布复用同一条线，网页里能看到同样的上下文。 */
+async function ensureAgentSession(ctx: Ctx, code: string): Promise<AgentSessionView> {
+  const token = requireToken(ctx);
+  const base = baseOf(ctx);
+  const path = `/canvas/${encodeURIComponent(code)}/agent/sessions`;
+  const list = await request<AgentSessionView[]>({
+    base,
+    token,
+    method: "GET",
+    path,
+    fetchImpl: ctx.fetchImpl,
+  });
+  if (Array.isArray(list) && list.length > 0) return list[list.length - 1]!;
+  return request<AgentSessionView>({
+    base,
+    token,
+    method: "POST",
+    path,
+    body: { title: "命令行" },
+    fetchImpl: ctx.fetchImpl,
+  });
+}
+
+/** 一条事件的人类可读形态：回复原文输出，审批把 payload 原样摊开，工具调用给一行摘要。 */
+function formatAgentEvent(e: AgentEventView): string {
+  const data = (e.data ?? {}) as Record<string, unknown>;
+  if (e.type.startsWith("approval.")) {
+    const id = typeof data.id === "string" ? data.id : "";
+    const payload = data.payload ?? {};
+    return [
+      `⚠ ${e.type}${id ? `（审批编号 ${id}）` : ""}`,
+      JSON.stringify(payload, null, 2),
+      id ? `  批准：vc agent approve ${id} --items 0,1,2` : "",
+      id ? `  驳回：vc agent approve ${id} --reject` : "",
+    ]
+      .filter(Boolean)
+      .join("\n");
+  }
+  // 助手的回答就是这轮要的东西，原样输出，不截断。
+  const text = typeof data.text === "string" ? data.text.trim() : "";
+  if (e.type === "message.done") return text ? `\n${text}\n` : "";
+  // 状态与用量是给机器看的，人类模式不刷屏。
+  if (e.type === "run.status" || e.type === "run.usage" || e.type === "message.user") return "";
+  const name = typeof data.name === "string" ? data.name : "";
+  const summary = typeof data.summary === "string" ? data.summary : "";
+  const label = typeof data.label === "string" ? data.label : "";
+  const tail = (summary || label || name).slice(0, 120);
+  return tail ? `  · ${e.type}  ${tail}` : `  · ${e.type}`;
+}
+
+/** 这条事件是否表示「可以收尾了」：有正文的回复、需要人拍板、或运行已经结束。 */
+function agentSettled(e: AgentEventView): boolean {
+  if (e.type.startsWith("approval.") || e.type === "run.finished" || e.type === "run.failed") return true;
+  if (e.type !== "message.done") return false;
+  const data = (e.data ?? {}) as Record<string, unknown>;
+  return typeof data.text === "string" && data.text.trim() !== "";
+}
+
+/** 拉一页事件；返回下一页的游标与这一页。 */
+async function pullAgentEvents(
+  ctx: Ctx,
+  sid: string,
+  after: number,
+): Promise<{ events: AgentEventView[]; next: number }> {
+  const token = requireToken(ctx);
+  const events = await request<AgentEventView[]>({
+    base: baseOf(ctx),
+    token,
+    method: "GET",
+    path: `/agent/sessions/${encodeURIComponent(sid)}/events?after=${after}&limit=100`,
+    fetchImpl: ctx.fetchImpl,
+  });
+  const list = Array.isArray(events) ? events : [];
+  const next = list.length > 0 ? list[list.length - 1]!.seq : after;
+  return { events: list, next };
+}
+
+/**
+ * 把一件事交给小镜做。默认只提交并打印运行编号；加 --watch 才跟到它有回复或需要审批。
+ *
+ * 为什么默认不跟：Agent 跑一轮可能几分钟、也可能停在审批等一整夜，脚本不该被它挂住。
+ */
+export async function agentRun(ctx: Ctx, args: Args): Promise<void> {
+  const code = args.positional[0];
+  const message = args.flags.message;
+  if (!code || typeof message !== "string" || !message.trim()) {
+    throw new APIError(-1, `用法：vc ${AGENT_USAGE}`, 2);
+  }
+
+  const session = await ensureAgentSession(ctx, code);
+  let sid = session.id;
+  // 从会话当前的位置往后看：历史事件已经发生过，不能在 --watch 里重放一遍。
+  let cursor = typeof session.last_seq === "number" ? session.last_seq : 0;
+  if (typeof args.flags.session === "string" && args.flags.session && args.flags.session !== sid) {
+    sid = args.flags.session;
+    const siblings = await request<AgentSessionView[]>({
+      base: baseOf(ctx),
+      token: requireToken(ctx),
+      method: "GET",
+      path: `/canvas/${encodeURIComponent(code)}/agent/sessions`,
+      fetchImpl: ctx.fetchImpl,
+    });
+    const hit = Array.isArray(siblings) ? siblings.find((item) => item.id === sid) : undefined;
+    cursor = typeof hit?.last_seq === "number" ? hit.last_seq : 0;
+  }
+
+  const body: Record<string, unknown> = { message };
+  const selection = listFlag(args.flags, "selection");
+  if (selection.length) body.selection = selection;
+  if (args.flags.budget !== undefined) {
+    body.budget_credits = toInt(args.flags.budget, "budget", { min: 0 });
+  }
+
+  const token = requireToken(ctx);
+  const run = await request<AgentRunView>({
+    base: baseOf(ctx),
+    token,
+    method: "POST",
+    path: `/agent/sessions/${encodeURIComponent(sid)}/runs`,
+    body,
+    fetchImpl: ctx.fetchImpl,
+  });
+
+  if (args.flags.watch === undefined) {
+    emit(
+      ctx,
+      { session_id: sid, run },
+      [
+        `已交给小镜：运行 ${run.id}（会话 ${sid}）`,
+        "加 --watch 可以跟到它跑完；停下来要你确认时，用 vc agent approve 决策。",
+      ].join("\n"),
+    );
+    return;
+  }
+
+  const interval = args.flags.interval === undefined ? 2 : toInt(args.flags.interval, "interval", { min: 1 });
+  const timeout = args.flags.timeout === undefined ? 600 : toInt(args.flags.timeout, "timeout", { min: 1 });
+  const deadline = Date.now() + timeout * 1000;
+  const printed: AgentEventView[] = [];
+  let waiting = false;
+
+  while (true) {
+    const { events, next } = await pullAgentEvents(ctx, sid, cursor);
+    cursor = next;
+    for (const e of events) {
+      printed.push(e);
+      const line = formatAgentEvent(e);
+      if (line) ctx.stderr(line);
+      if (e.type.startsWith("approval.")) waiting = true;
+    }
+    // 它已经回了话就别继续干等：收尾动作（用量、状态归位）不影响人看结果。
+    if (waiting || events.some(agentSettled)) break;
+    if (Date.now() >= deadline) {
+      emit(
+        ctx,
+        { session_id: sid, run, events: printed, waiting: false },
+        `等到 ${timeout} 秒还没结束，运行 ${run.id} 仍在服务端继续。\n继续看：vc agent events ${sid} --after ${cursor}`,
+      );
+      process.exitCode = 3;
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, interval * 1000));
+  }
+
+  const tail = waiting
+    ? "它停下来等你确认：按上面列出的编号批准，或 --reject 驳回。"
+    : "小镜已回复。它若还在后台收尾，用 vc agent events 接着看。";
+  emit(ctx, { session_id: sid, run, events: printed, waiting }, tail);
+}
+
+/** 看一条会话里已经发生的事；--after 从某个序号之后接着看。 */
+export async function agentEvents(ctx: Ctx, args: Args): Promise<void> {
+  const sid = args.positional[0];
+  if (!sid) throw new APIError(-1, `用法：vc ${AGENT_USAGE}`, 2);
+  const after = args.flags.after === undefined ? 0 : toInt(args.flags.after, "after", { min: 0 });
+  const { events, next } = await pullAgentEvents(ctx, sid, after);
+  emit(
+    ctx,
+    { session_id: sid, events, next },
+    events.length ? events.map(formatAgentEvent).join("\n") : "这段时间没有新事件。",
+  );
+}
+
+/**
+ * 对一次审批下决定。默认整体通过；--items 只批准指定序号，--reject 整体驳回。
+ * 命令行不猜条目的含义：编号来自 agent 事件里列出的那一批动作，人看到什么就批什么。
+ */
+export async function agentApprove(ctx: Ctx, args: Args): Promise<void> {
+  const aid = args.positional[0];
+  if (!aid) throw new APIError(-1, `用法：vc ${AGENT_USAGE}`, 2);
+  const reject = args.flags.reject !== undefined;
+  const items = listFlag(args.flags, "items").map((raw) => toInt(raw, "items", { min: 0 }));
+  const body: Record<string, unknown> = { decision: reject ? "reject" : "approve" };
+  if (!reject && items.length) {
+    body.items = items.map((index) => ({ index, approve: true }));
+  }
+  if (typeof args.flags.answer === "string") body.answer = args.flags.answer;
+
+  const token = requireToken(ctx);
+  const view = await request<Record<string, unknown>>({
+    base: baseOf(ctx),
+    token,
+    method: "POST",
+    path: `/agent/approvals/${encodeURIComponent(aid)}/decision`,
+    body,
+    fetchImpl: ctx.fetchImpl,
+  });
+  emit(ctx, view, `已提交决定：${reject ? "驳回" : "批准"}${items.length ? `（条目 ${items.join(",")}）` : ""}。`);
+}
+
+/** 停掉一轮运行：Agent 不再继续，已经提交的生成任务照常完成。 */
+export async function agentCancel(ctx: Ctx, args: Args): Promise<void> {
+  const rid = args.positional[0];
+  if (!rid) throw new APIError(-1, `用法：vc ${AGENT_USAGE}`, 2);
+  const token = requireToken(ctx);
+  const view = await request<Record<string, unknown>>({
+    base: baseOf(ctx),
+    token,
+    method: "POST",
+    path: `/agent/runs/${encodeURIComponent(rid)}/cancel`,
+    fetchImpl: ctx.fetchImpl,
+  });
+  emit(ctx, view, `已取消运行 ${rid}。`);
+}
+
 export const COMMANDS = {
   login,
   logout,
@@ -1881,4 +2140,8 @@ export const COMMANDS = {
   taskGet,
   taskWait,
   trace,
+  agentRun,
+  agentEvents,
+  agentApprove,
+  agentCancel,
 };

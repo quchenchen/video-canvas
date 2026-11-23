@@ -117,7 +117,30 @@ canvas compose-cancel <画布编号> --job <任务id>
 - `compose-status --node` 不带 `--assets` 时不判断「是否过期」；带上才返回 `stale`。
 - 同一节点同时只允许一个未落终态的任务。
 
-## 六、短剧（只读 + 任务控制）
+## 六、画布 Agent（小镜）
+
+```
+agent run <画布编号> --message "…" [--selection 节点id,节点id] [--budget 积分]
+          [--session 会话编号] [--watch] [--interval 2] [--timeout 600]
+agent events <会话编号> [--after 序号]
+agent approve <审批编号> [--items 0,1] [--reject] [--answer 文本]
+agent cancel <运行编号>
+```
+
+- `run` 返回 `{session_id, run:{id, session_id, status}}`。不发 `--session` 时复用该画布已有的会话（没有就新建一条，
+  标题「命令行」）；网页与命令行看的是同一条会话。
+- `--selection` 是节点 id 列表，圈定这次允许它动的范围；不给由它自己读画布。
+- `--budget` 换算成这一轮的花费上限（积分），不给用服务端默认。
+- `--watch` 从会话**当前序号之后**开始跟：只打印本轮新事件，不重放历史；遇到「有正文的回复」「审批」「运行结束」
+  任一情况就返回，不会干等到超时。退出码 3 表示等到 `--timeout` 仍未出现上述三种。
+- 事件形如 `{session_id, canvas_id, run_id, seq, type, data, created_at}`。`type` 常见值：
+  `message.user`、`run.status`、`tool.start` / `tool.end`、`message.done`（`data.text` 是正文）、
+  `approval.created`（`data.id` 是审批编号，`data.payload` 是要批准的动作）、`run.usage`、`run.finished`。
+- `approve`：`decision` 为 `approve` / `reject`；`--items` 只批指定序号（不传表示整批通过），
+  `--answer` 回答它顺带提出的问题。返回审批视图（`id` / `kind` / `status` / `payload` / `quote_credits` / `expires_at`）。
+- `cancel` 只停这一轮；它已经提交的生成任务在服务端继续跑完、产物照常写回节点。
+
+## 七、短剧（只读 + 任务控制）
 
 | 命令               | 参数                                 | 说明                                                                                         |
 | ------------------ | ------------------------------------ | -------------------------------------------------------------------------------------------- |

@@ -8,6 +8,10 @@ import { fileURLToPath } from "node:url";
 
 import { APIError, normalizeBase, siteRootOf } from "./client.ts";
 import {
+  agentApprove,
+  agentCancel,
+  agentEvents,
+  agentRun,
   canvasCompose,
   canvasComposeCancel,
   canvasComposeStatus,
@@ -91,6 +95,14 @@ const USAGE = `video-canvas-cli（beta）— 连镜命令行
 生成任务
   task get <id|task_ref>
   task wait <id|task_ref> [--timeout 600] [--interval 3]
+
+画布 Agent（小镜）：把要改/要生成的事交给它，需要拍板的动作停下来等你决定
+  agent run <画布编号> --message "把 S03 重新生成成 10 秒视频" [--selection 节点id,节点id]
+            [--budget 积分] [--session 会话编号] [--watch] [--interval 2] [--timeout 600]
+  agent events <会话编号> [--after 序号]      看已经发生的事（含审批条目）
+  agent approve <审批编号> [--items 0,1] [--reject] [--answer 文本]
+  agent cancel <运行编号>
+                                        只提交时打印运行编号；--watch 跟到结束或等到需要审批
 
 短剧（只读与任务控制；建项目、改剧本、跑任务仍在网页里）
   drama list [--keyword 关键词] [--page N] [--page-size N]
@@ -194,6 +206,24 @@ async function runModel(ctx: Ctx, positional: string[], flags: Flags): Promise<v
   }
 }
 
+/** 小镜子命令：run / events / approve / cancel。 */
+async function runAgent(ctx: Ctx, positional: string[], flags: Flags): Promise<void> {
+  const [sub, ...rest] = positional;
+  const args: Args = { positional: rest, flags };
+  switch (sub) {
+    case "run":
+      return agentRun(ctx, args);
+    case "events":
+      return agentEvents(ctx, args);
+    case "approve":
+      return agentApprove(ctx, args);
+    case "cancel":
+      return agentCancel(ctx, args);
+    default:
+      throw new APIError(-1, `未知的 agent 子命令：${sub || "（空）"}\n\n${USAGE}`, 2);
+  }
+}
+
 /** 短剧子命令。 */
 async function runDrama(ctx: Ctx, positional: string[], flags: Flags): Promise<void> {
   const [sub, ...rest] = positional;
@@ -293,6 +323,8 @@ async function main(argv: string[]): Promise<void> {
         return await runModel(ctx, positional, flags);
       case "drama":
         return await runDrama(ctx, positional, flags);
+      case "agent":
+        return await runAgent(ctx, positional, flags);
       case "generate":
         return await generate(ctx, { positional, flags });
       case "credits":

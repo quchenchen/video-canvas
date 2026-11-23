@@ -69,7 +69,11 @@ vc canvas node add <画布编号> --kind script --label "旁白" --text "第一�
 vc canvas save <画布编号> --payload 画布.json --revision 3
 
 # 成片：按连线顺序拼片
-vc canvas compose <画布编号> --node <成片节点id> --wait`;
+vc canvas compose <画布编号> --node <成片节点id> --wait
+
+# 复杂操作交给画布里的 Agent：它挑模型、接参考图，要花钱或不可逆时停下来等你确认
+vc agent run <画布编号> --message "把 S03 重做成 10 秒视频" --watch
+vc agent approve <审批编号> --items 0,1`;
 
   const tasks = `vc task get <任务ID>                  # 查一次生成任务
 vc task wait <任务ID> --timeout 600   # 阻塞到出结果；超时是退出码 3，任务仍在跑
