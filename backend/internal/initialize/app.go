@@ -91,9 +91,10 @@ func NewApp(cfg *config.Config) (*App, error) {
 		JWTSecret: cfg.JWT.Secret, JWTIssuer: cfg.JWT.Issuer, JWTExpireHours: cfg.JWT.ExpireHours,
 		Debug: cfg.Server.Mode == "debug", // 仅 debug 模式把验证码打到日志
 	})
-	// 命令行设备授权：签发的还是同一套 JWT（含 token_version），CLI 登录与网页登录等价
+	// 命令行设备授权：签发的还是同一套 JWT（含 token_version），CLI 登录与网页登录等价。
+	// 有效期另算：走后台「命令行登录有效期」（缺省 30 天），不复用网页的 jwt.expire_hours。
 	cliDeviceSvc := service.NewCLIDeviceService(service.CLIDeviceDeps{
-		Repo: repository.NewCLIDeviceRepository(db), Users: userRepo, Issuer: userSvc,
+		Repo: repository.NewCLIDeviceRepository(db), Users: userRepo, Issuer: userSvc, TokenDays: settingsSvc,
 	})
 	// 命令行发行：安装包从 cli/ 目录现场打包，版本取自 cli/package.json（与站点版本无关）。
 	// APP_CLI_DIR 可覆盖目录，镜像里是 /app/cli。

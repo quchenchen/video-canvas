@@ -30,10 +30,12 @@ const toValues = (settings: RegisterSettings): RegisterSettingsValues => ({
   default_max_active_tasks: String(settings.default_max_active_tasks),
   queue_multiplier: String(settings.queue_multiplier),
   queue_max_wait_minutes: String(settings.queue_max_wait_minutes),
+  cli_token_days: String(settings.cli_token_days),
 });
 
 /**
- * 注册设置表单：开放注册开关、新用户初始积分、默认并发上限，以及排队倍数与排队超时（任务队列的用户侧限流）。
+ * 注册设置表单：开放注册开关、新用户初始积分、默认并发上限，排队倍数与排队超时（任务队列的用户侧限流），
+ * 以及外部接入令牌的默认有效期。
  * @param settings 已保存的设置
  * @param canWrite 是否可写（super_admin）
  * @param onSaved 保存成功后带回服务端返回的设置
@@ -64,6 +66,7 @@ function RegisterForm({
         default_max_active_tasks: Number(values.default_max_active_tasks),
         queue_multiplier: Number(values.queue_multiplier),
         queue_max_wait_minutes: Number(values.queue_max_wait_minutes),
+        cli_token_days: Number(values.cli_token_days),
       });
       if (!aliveRef.current) return;
       toast.success("注册设置已保存");
@@ -164,6 +167,23 @@ function RegisterForm({
                 aria-invalid={!!errors.queue_max_wait_minutes}
                 onChange={(event) =>
                   setValues((prev) => ({ ...prev, queue_max_wait_minutes: event.target.value }))
+                }
+              />
+            </FormField>
+            <FormField
+              label="命令行登录有效期（天）"
+              htmlFor="register-cli-token-days"
+              hint="1–365；vc 登录一次可免登录使用的天数"
+              error={errors.cli_token_days}
+            >
+              <Input
+                id="register-cli-token-days"
+                inputMode="numeric"
+                value={values.cli_token_days}
+                disabled={!canWrite || saving}
+                aria-invalid={!!errors.cli_token_days}
+                onChange={(event) =>
+                  setValues((prev) => ({ ...prev, cli_token_days: event.target.value }))
                 }
               />
             </FormField>

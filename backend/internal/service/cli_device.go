@@ -22,6 +22,11 @@ const (
 	cliUserCodeLen           = 8
 )
 
+// DefaultCLITokenTTL 是命令行登录态的默认有效期（30 天）。
+// 设备码只管「这次确认多久内有效」，登录态管「确认之后能免登录用多久」，两者不是一个数：
+// 前者 10 分钟，后者 30 天。后台「注册设置 → 命令行登录有效期」可改后者。
+const DefaultCLITokenTTL = 30 * 24 * time.Hour
+
 // 用户码字符集：去掉元音（避免拼出单词）和易混字符（0/O、1/I/L）。
 // 30^8 的空间足够，配合 10 分钟过期与轮询限速，猜不中。
 const cliUserCodeAlphabet = "BCDFGHJKLMNPQRSTVWXZ23456789"
@@ -48,6 +53,13 @@ type CLIDeviceUserReader interface {
 // CLIDeviceTokenIssuer 签发登录 JWT；实现是 UserService，保证与网页登录同一套 token_version 语义。
 type CLIDeviceTokenIssuer interface {
 	IssueToken(u *model.User) (*model.LoginView, error)
+	// IssueTokenWithTTL 按指定有效期签发：命令行登录态用后台配置的天数，不是网页的 72 小时。
+	IssueTokenWithTTL(u *model.User, ttl time.Duration) (*model.LoginView, error)
+}
+
+// CLITokenPolicy 提供命令行登录态的有效期（天）。后台「注册设置」是唯一来源。
+type CLITokenPolicy interface {
+	CLITokenDays(ctx context.Context) (int, error)
 }
 
 // CLIDeviceDeps 是设备授权服务的依赖与配置。
@@ -59,6 +71,8 @@ type CLIDeviceDeps struct {
 	TTL    time.Duration
 	// Interval 是同一设备码两次轮询的最小间隔，也是返回给 CLI 的 interval。
 	Interval time.Duration
+	// TokenDays 读命令行登录态的有效期；为空或读取失败时按 DefaultCLITokenTTL（30 天）。
+	TokenDays CLITokenPolicy
 }
 
 // CLIDeviceService 负责命令行设备授权的申请、轮询换令牌与网页确认。
@@ -175,7 +189,7 @@ func (s *CLIDeviceService) consume(ctx context.Context, rec *model.CLIDeviceCode
 	if user.Status != model.UserStatusActive {
 		return nil, errcode.ErrCLIDeviceDisabled
 	}
-	view, err := s.Issuer.IssueToken(user)
+	view, err := s.Issuer.IssueTokenWithTTL(user, s.tokenTTL(ctx))
 	if err != nil {
 		return nil, err
 	}
@@ -185,6 +199,19 @@ func (s *CLIDeviceService) consume(ctx context.Context, rec *model.CLIDeviceCode
 		ExpireAt: view.ExpireAt,
 		Role:     view.Role,
 	}, nil
+}
+
+// tokenTTL 取命令行登录态的有效期：后台设置优先，读不到（或值非法）就按 30 天。
+// 这里**不读** mcp_token_days / mcp_call_timeout：那是外部接入令牌与单次调用超时，跟登录态没关系。
+func (s *CLIDeviceService) tokenTTL(ctx context.Context) time.Duration {
+	if s.TokenDays == nil {
+		return DefaultCLITokenTTL
+	}
+	days, err := s.TokenDays.CLITokenDays(ctx)
+	if err != nil || days <= 0 {
+		return DefaultCLITokenTTL
+	}
+	return time.Duration(days) * 24 * time.Hour
 }
 
 // Describe 给授权页展示设备信息。只认未过期的用户码，不泄露发起方 IP 等环境信息。

@@ -16,8 +16,14 @@ type MyClaims struct {
 
 // GenerateToken 用 HS256 签发 token，返回 token 字符串和过期时间（Unix 秒）。
 func GenerateToken(userID uint, username string, tokenVersion int, secret string, issuer string, expireHours int) (string, int64, error) {
+	return GenerateTokenFor(userID, username, tokenVersion, secret, issuer, time.Duration(expireHours)*time.Hour)
+}
+
+// GenerateTokenFor 与 GenerateToken 相同，但有效期由调用方给定时长。
+// 网页登录按 jwt.expire_hours 算，命令行登录按后台的「命令行登录有效期」算，别把两者并成一个数。
+func GenerateTokenFor(userID uint, username string, tokenVersion int, secret string, issuer string, ttl time.Duration) (string, int64, error) {
 	now := time.Now()
-	expiresAt := now.Add(time.Duration(expireHours) * time.Hour)
+	expiresAt := now.Add(ttl)
 
 	claims := MyClaims{
 		UserID:       userID,

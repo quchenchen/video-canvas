@@ -10,6 +10,8 @@ export interface RegisterSettings {
   queue_multiplier: number;
   /** 排队超时（分钟），5 到 1440：排队超过这个时间的任务会过期并退回积分 */
   queue_max_wait_minutes: number;
+  /** 命令行登录态的有效期（天），1 到 365：设备授权签发的登录态活这么久，缺省 30 */
+  cli_token_days: number;
 }
 
 /** SMTP 加密方式 */

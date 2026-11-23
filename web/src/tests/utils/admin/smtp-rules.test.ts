@@ -78,6 +78,7 @@ describe("注册设置校验", () => {
     default_max_active_tasks: "3",
     queue_multiplier: "5",
     queue_max_wait_minutes: "60",
+    cli_token_days: "30",
   };
 
   test("初始积分为非负整数，默认并发 1 到 64", () => {
@@ -117,6 +118,17 @@ describe("注册设置校验", () => {
       expect(
         validateRegisterSettings({ ...ok, queue_max_wait_minutes }).queue_max_wait_minutes,
       ).toBeUndefined();
+    }
+  });
+
+  test("命令行登录有效期是 1 到 365 天的整数", () => {
+    for (const cli_token_days of ["", "0", "366", "1.5", "x", "-1"]) {
+      expect(validateRegisterSettings({ ...ok, cli_token_days }).cli_token_days).toBe(
+        "范围 1 到 365",
+      );
+    }
+    for (const cli_token_days of ["1", "30", "365", " 90 "]) {
+      expect(validateRegisterSettings({ ...ok, cli_token_days }).cli_token_days).toBeUndefined();
     }
   });
 
