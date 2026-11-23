@@ -18,6 +18,7 @@ type BaseModel struct {
 func All() []any {
 	return []any{
 		&User{},
+		&CLIDeviceCode{},
 		&CanvasProject{},
 		&GenerationTask{},
 		&GenerationTaskEvent{},

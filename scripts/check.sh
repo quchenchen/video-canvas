@@ -5,7 +5,7 @@
 #   bash scripts/check.sh            # 按改动自动选 web / backend / agent
 #   bash scripts/check.sh --fix      # 先自动格式化（web/agent 用 oxfmt，backend 用 golangci-lint fmt）再检查
 #   bash scripts/check.sh --all      # 不看改动，三端全跑
-#   bash scripts/check.sh web agent  # 只跑指定部分
+#   bash scripts/check.sh web agent  # 只跑指定部分（web / backend / agent / cli）
 #   SKIP_TESTS=1 bash scripts/check.sh  # 只跑格式 / 类型 / lint / 构建，跳过测试
 #
 # 注意：BUN_OPTIONS 里带 --preload 时 `bun run <脚本>` 会打印帮助并返回 0（假通过），这里统一清掉它。
@@ -22,18 +22,18 @@ for arg in "$@"; do
   case "$arg" in
     --fix) FIX=1 ;;
     --all) ALL=1 ;;
-    web | backend | agent) TARGETS+=("$arg") ;;
+    web | backend | agent | cli) TARGETS+=("$arg") ;;
     *) echo "未知参数：$arg" >&2; exit 2 ;;
   esac
 done
 
 if [ ${#TARGETS[@]} -eq 0 ]; then
   if [ "$ALL" -eq 1 ]; then
-    TARGETS=(web backend agent)
+    TARGETS=(web backend agent cli)
   else
     base="$(git merge-base HEAD master 2>/dev/null || git merge-base HEAD origin/master 2>/dev/null || echo HEAD)"
     changed="$( { git diff --name-only "$base"; git diff --name-only; git ls-files --others --exclude-standard; } | sort -u)"
-    for t in web backend agent; do
+    for t in web backend agent cli; do
       grep -q "^$t/" <<<"$changed" && TARGETS+=("$t")
     done
     if [ ${#TARGETS[@]} -eq 0 ]; then echo "没有 web/ backend/ agent/ 的改动，无需检查。"; exit 0; fi
@@ -77,6 +77,13 @@ for t in "${TARGETS[@]}"; do
       step "agent 类型检查" agent npm run typecheck
       want_tests && step "agent 测试" agent npm test
       step "agent 构建" agent npm run build
+      ;;
+    cli)
+      # 复用 web 已安装的 oxfmt / oxlint，CLI 自己不装依赖
+      [ "$FIX" -eq 1 ] && step "cli 自动格式化" cli ../web/node_modules/.bin/oxfmt .
+      step "cli 格式检查 (oxfmt --check)" cli ../web/node_modules/.bin/oxfmt --check .
+      step "cli lint (oxlint)" cli ../web/node_modules/.bin/oxlint .
+      want_tests && step "cli 测试 (node --test)" cli sh -c 'node --test test/*.test.mjs'
       ;;
   esac
 done

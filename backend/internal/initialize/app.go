@@ -91,6 +91,10 @@ func NewApp(cfg *config.Config) (*App, error) {
 		JWTSecret: cfg.JWT.Secret, JWTIssuer: cfg.JWT.Issuer, JWTExpireHours: cfg.JWT.ExpireHours,
 		Debug: cfg.Server.Mode == "debug", // 仅 debug 模式把验证码打到日志
 	})
+	// 命令行设备授权：签发的还是同一套 JWT（含 token_version），CLI 登录与网页登录等价
+	cliDeviceSvc := service.NewCLIDeviceService(service.CLIDeviceDeps{
+		Repo: repository.NewCLIDeviceRepository(db), Users: userRepo, Issuer: userSvc,
+	})
 
 	// 对外 ID 编码：画布 ID 等以十六进制串暴露，库里主键不变
 	idKey := cfg.Server.IDKey
@@ -365,6 +369,7 @@ func NewApp(cfg *config.Config) (*App, error) {
 		AgentProxy:      agentProxy,
 		Health:          handler.NewHealthHandler(db, rdb),
 		User:            handler.NewUserHandler(userSvc),
+		CLIDevice:       handler.NewCLIDeviceHandler(cliDeviceSvc),
 		Me:              handler.NewMeHandler(meSvc),
 		CanvasProject:   handler.NewCanvasProjectHandler(canvasProjectSvc),
 		Drama:           handler.NewDramaHandler(dramaSvc),

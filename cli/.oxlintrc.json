@@ -1,0 +1,11 @@
+{
+  "$schema": "../web/node_modules/oxlint/configuration_schema.json",
+  "categories": { "correctness": "error" },
+  "rules": {
+    "eqeqeq": "warn",
+    "no-var": "error",
+    "prefer-const": "error",
+    "import/no-duplicates": "warn"
+  },
+  "ignorePatterns": ["node_modules"]
+}

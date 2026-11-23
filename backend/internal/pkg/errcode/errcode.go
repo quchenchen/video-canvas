@@ -43,6 +43,13 @@ var (
 	ErrUserNotFound      = New(20001, "用户不存在", http.StatusNotFound)
 	ErrUserExists        = New(20002, "用户名已存在", http.StatusConflict)
 	ErrInvalidCredential = New(20003, "用户名或密码错误", http.StatusUnauthorized)
+
+	// CLI 设备授权：命令行登录用的短码流程。
+	ErrCLIDeviceInvalid  = New(20010, "设备码无效或已过期，请重新执行登录", http.StatusBadRequest)
+	ErrCLIDeviceState    = New(20011, "设备码当前状态不允许这个操作", http.StatusConflict)
+	ErrCLIDeviceSlowDown = New(20012, "轮询太快，请按返回的 interval 间隔重试", http.StatusTooManyRequests)
+	ErrCLIDeviceUserCode = New(20013, "用户码不对或已过期", http.StatusBadRequest)
+	ErrCLIDeviceDisabled = New(20014, "账号已停用，不能授权命令行登录", http.StatusForbidden)
 )
 
 // 画布模块 3xxxx
