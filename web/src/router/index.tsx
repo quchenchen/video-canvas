@@ -27,6 +27,9 @@ import VersionSettingsPage from "@/pages/admin/settings/version-settings";
 import Assets from "@/pages/assets";
 import Canvas from "@/pages/canvas";
 import CanvasList from "@/pages/home/canvas-list";
+import CLIAuthorize from "@/pages/cli/authorize";
+import CLIDocsPage from "@/pages/cli/docs";
+import CLIPage from "@/pages/cli";
 import Conversation from "@/pages/conversation";
 import DramaList from "@/pages/drama";
 import DramaStudio from "@/pages/drama/studio";
@@ -117,6 +120,9 @@ export const router = createBrowserRouter([
               { path: "conversations/new", element: <Navigate to="/" replace /> },
               { path: "conversations/:id", element: <Conversation /> },
               { path: "profile", element: <Profile /> },
+              /** 命令行（CLI）：用户与后台共用同一个组件 */
+              { path: "cli", element: <CLIPage /> },
+              { path: "cli/docs", element: <CLIDocsPage /> },
             ],
           },
           {
@@ -174,6 +180,8 @@ export const router = createBrowserRouter([
               { path: "agent/steps", element: <AgentStepsPage /> },
               { path: "agent/runs", element: <AgentRunsPage /> },
               { path: "agent/tokens", element: <AgentTokensPage /> },
+              { path: "cli", element: <CLIPage /> },
+              { path: "cli/docs", element: <CLIDocsPage /> },
               { path: "users", element: <UsersPage /> },
               { path: "payment", element: <PaymentAdminPage /> },
               { path: "usage", element: <UsagePage /> },

@@ -52,7 +52,7 @@ describe("后台导航", () => {
     expect(findNav("/admin/settings/version")?.item.label).toBe("版本与升级");
   });
 
-  test("AI 配置分组：总览、任务队列、模型渠道、插件、技能、运行记录、分析令牌；独立的“模型”页已并入渠道页，不再有单独的 Agent 分组", () => {
+  test("AI 配置分组：总览、任务队列、模型渠道、插件、技能、运行记录、分析令牌、命令行；独立的“模型”页已并入渠道页，不再有单独的 Agent 分组", () => {
     const group = ADMIN_NAV.find((item) => item.label === "AI 配置");
     expect(group?.items.map((item) => [item.to, item.label])).toEqual([
       ["ai/overview", "总览"],
@@ -62,8 +62,17 @@ describe("后台导航", () => {
       ["agent/skills", "技能"],
       ["agent/runs", "运行记录"],
       ["agent/tokens", "分析令牌"],
+      ["cli", "命令行（CLI）"],
     ]);
     expect(ADMIN_NAV.some((item) => item.label === "Agent")).toBe(false);
+  });
+
+  test("命令行页是独立入口：面包屑落在 AI 配置分组，图标不与其他菜单项重复", () => {
+    const found = findNav("/admin/cli");
+    expect(found?.group.label).toBe("AI 配置");
+    expect(found?.item.label).toBe("命令行（CLI）");
+    const items = ADMIN_NAV.flatMap((group) => group.items);
+    expect(items.filter((item) => item.icon === found?.item.icon)).toHaveLength(1);
   });
 
   test("技能页的面包屑落在 AI 配置分组下，路径不变", () => {

@@ -4,6 +4,10 @@
 
 ## [Unreleased]
 
+### 新增
+
+- 新增命令行工具 `video-canvas-cli`（命令名 `video-canvas-cli` / `vc`）：用设备码在浏览器里确认一次即可登录，不必把密码或长期令牌交给脚本。支持画布列表 / 详情 / 新建 / 导入导出 / 整图保存、生成任务查询与等待、运行记录导出（转发 `scripts/agent-trace`）；`--json` 输出一行结构化结果，供脚本与 Agent 解析。登录接口为 `POST /auth/cli/device` 与 `POST /auth/cli/token`，授权页在 `/cli/authorize`，签发的仍是同一套 JWT（含 `token_version`），改密码后 CLI 令牌同样失效。命令行有自己的一页（`/cli`，后台在「AI 配置 → 命令行（CLI）」）；页头的「查看 CLI 文档」进完整参考（`/cli/docs`，正文是 `web/src/content/cli-docs.md`）。页面上的登录地址按当前站点实际使用的 `VITE_API_BASE_URL` 实时推导，写死域名、API 分域或带前缀都能自动跟着变。
+
 ## [0.7.2] - 2026-11-22
 
 ### 新增

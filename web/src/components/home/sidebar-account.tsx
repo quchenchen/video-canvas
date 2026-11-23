@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { User } from "lucide-react";
+import { Terminal, User } from "lucide-react";
 import { useNavigate } from "react-router";
 
 import { NavUser } from "@/components/admin-ui/nav-user";
@@ -32,6 +32,11 @@ export function SidebarAccount({ children }: { children?: ReactNode }) {
       <DropdownMenuItem onClick={() => navigate("/profile")}>
         <User />
         个人中心
+      </DropdownMenuItem>
+      {/* 命令行：安装说明与文档在自己那页 */}
+      <DropdownMenuItem onClick={() => navigate("/cli")}>
+        <Terminal />
+        命令行（CLI）
       </DropdownMenuItem>
       {children}
     </NavUser>
