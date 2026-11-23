@@ -133,6 +133,7 @@ func TestCLIInstallScript(t *testing.T) {
 		"VC_BASE:-https://example.com", // 站点地址注入到默认值里
 		`API="$VC_BASE/api/v1/cli"`,
 		"download?os=unix",
+		"JSON.parse(s).data.version", // 接口是 {code,msg,data} 信封，版本在 data 里
 		"~/.local",
 		"ln -sf",
 	} {
@@ -148,6 +149,7 @@ func TestCLIInstallScript(t *testing.T) {
 	for _, want := range []string{
 		"https://example.com",
 		"download?os=windows",
+		".data.version",
 		"Expand-Archive",
 		"LOCALAPPDATA",
 	} {
