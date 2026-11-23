@@ -57,6 +57,8 @@ func ListenBridge(ac config.Agent) (net.Listener, error) {
 type agentRuntime struct {
 	server *http.Server
 	ln     net.Listener
+	// bridge 是工具执行器：对外 MCP 接入复用它，工具行为只有一处定义，不会和内置 Agent 漂移。
+	bridge *agentsvc.AgentBridge
 }
 
 // agentDeps 是装配运行时需要的已有服务。
@@ -139,7 +141,8 @@ func newAgentRuntime(cfg *config.Config, d agentDeps) (*agentRuntime, error) {
 	// Agent 服务产生的事件经 /events 推过来，由 Go 发给浏览器
 	platform := agenthandler.NewPlatformHandler(bridge).WithEventRelay(agentsvc.NewEventRelay(d.broadcaster))
 	return &agentRuntime{
-		ln: ln,
+		ln:     ln,
+		bridge: bridge,
 		// 没有读写超时：模型代理是长连接的流式响应，可能持续几分钟；防慢速攻击靠只监听内网并要求服务令牌
 		server: &http.Server{Handler: router.NewBridge(cfg.Server.Mode, platform, ac.ServiceToken), ReadHeaderTimeout: 10 * time.Second},
 	}, nil

@@ -5,6 +5,7 @@ import (
 
 	"video-canvas/internal/handler"
 	agenthandler "video-canvas/internal/handler/agent"
+	mcphandler "video-canvas/internal/handler/mcp"
 	"video-canvas/internal/middleware"
 	"video-canvas/internal/pkg/errcode"
 	"video-canvas/internal/pkg/response"
@@ -20,12 +21,18 @@ type Handlers struct {
 	Storyboard     *handler.StoryboardHandler     // 画布分镜表：从剧本拆分镜
 	CanvasCompose  *handler.CanvasComposeHandler  // 画布成片合成：把已生成的片段按顺序拼成一个 mp4
 	CanvasArchive  *handler.CanvasArchiveHandler  // 画布素材按节点归类打包下载（票据签发 + 流式 zip）
-	Conversation   *handler.ConversationHandler   // 首页生成：对话与生成记录
+	// MCP：对外接入端点与后台项目管理。MCP 为 nil 表示没启用画布 Agent，端点不注册。
+	MCP          *mcphandler.Server
+	MCPAuth      middleware.MCPAuthenticator  // 校验 MCP 项目令牌（Bearer vcm_…）
+	AdminMCP     *handler.MCPAdminHandler     // 后台「MCP 接入」：全局视角的项目与令牌管理
+	MCPMe        *handler.MCPSelfHandler      // 「我的 MCP 接入」：任何登录用户给自己开
+	Conversation *handler.ConversationHandler // 首页生成：对话与生成记录
 	// AgentProxy：画布 Agent 的会话、运行、审批、评价由独立的 Agent 服务负责，这些接口只校验登录态后反向代理过去
 	// （路径、方法、信封不变）；技能目录等仍由 Go 自己处理。为 nil 表示没有启用 Agent，这些接口统一返回「Agent 暂不可用」。
 	AgentProxy      *agenthandler.AgentProxyHandler
 	PricingSettings *handler.PricingSettingsHandler
-	AgentSkill      *agenthandler.SkillHandler // Agent 技能：用户端目录 + 管理端导入 / 版本 / 启停
+	// Agent 技能：用户端目录 + 管理端导入 / 版本 / 启停
+	AgentSkill *agenthandler.SkillHandler
 
 	// Agent 运行观测：后台只读查看与导出、分析令牌
 	AgentObserve  *agenthandler.AgentObserveHandler // 后台运行记录（只读）和分析令牌管理
@@ -98,6 +105,12 @@ func New(mode, jwtSecret string, h Handlers) *gin.Engine {
 		// 画布素材打包下载：浏览器原生 <a download> 带不上 Authorization，身份由票据里的签名保证
 		v1.GET("/canvas/:id/assets/archive", h.CanvasArchive.Download)
 
+		// 对外 MCP 接入：只认 Bearer vcm_ 项目令牌，不认登录 JWT 也不认分析令牌；
+		// 能调哪些工具由项目的权限档位决定，画布固定在项目上。
+		if h.MCP != nil && h.MCPAuth != nil {
+			v1.POST("/mcp", middleware.RequireMCPToken(h.MCPAuth), h.MCP.Handle)
+		}
+
 		// River UI：浏览器在新标签页里直接打开，带不上 Authorization 头；身份由一次性 ticket 换来的会话 cookie 决定，仅 super_admin
 		v1.GET("/admin/river", h.RiverUI.Redirect)
 		v1.Any("/admin/river/*path", h.RiverUI.Serve)
@@ -117,6 +130,20 @@ func New(mode, jwtSecret string, h Handlers) *gin.Engine {
 		me.GET("/stats", h.Me.Stats)
 		me.GET("/activity", h.Me.Activity)     // ?tz=Asia/Shanghai&year=2026
 		me.GET("/credits/ledger", h.Me.Ledger) // ?type=all|task|admin&page=1&page_size=20
+
+		// 我的 MCP 接入：任何登录用户都能给自己开，不必等管理员建项目。
+		// 只操作当前用户自己的数据，项目不属于自己时按「不存在」回。
+		if h.MCPMe != nil {
+			mcpMe := me.Group("/mcp")
+			mcpMe.GET("/projects", h.MCPMe.List)
+			mcpMe.POST("/projects", h.MCPMe.Create)
+			mcpMe.PUT("/projects/:id", h.MCPMe.Update)
+			mcpMe.DELETE("/projects/:id", h.MCPMe.Delete)
+			mcpMe.GET("/projects/:id/tokens", h.MCPMe.ListTokens)
+			mcpMe.POST("/projects/:id/tokens", h.MCPMe.IssueToken)
+			mcpMe.DELETE("/projects/:id/tokens/:tokenId", h.MCPMe.RevokeToken)
+			mcpMe.GET("/projects/:id/tokens/:tokenId/secret", h.MCPMe.TokenSecret)
+		}
 
 		// 画布操作
 		canvas := auth.Group("/canvas")
@@ -397,6 +424,19 @@ func New(mode, jwtSecret string, h Handlers) *gin.Engine {
 		tokensAdmin.GET("", h.AgentObserve.ListTokens)
 		tokensAdmin.POST("", h.AgentObserve.IssueToken)
 		tokensAdmin.DELETE("/:id", h.AgentObserve.RevokeToken)
+
+		// MCP 接入：读与改 = admin 或 super_admin；删除项目 = 仅 super_admin（和渠道 / 插件同一档）。
+		if h.AdminMCP != nil {
+			mcpAdmin := auth.Group("/admin/mcp", middleware.RequireAdmin(h.AdminRole))
+			mcpAdmin.GET("/projects", h.AdminMCP.List)
+			mcpAdmin.POST("/projects", h.AdminMCP.Create)
+			mcpAdmin.PUT("/projects/:id", h.AdminMCP.Update)
+			mcpAdmin.DELETE("/projects/:id", superOnly, h.AdminMCP.Delete)
+			mcpAdmin.GET("/projects/:id/tokens", h.AdminMCP.ListTokens)
+			mcpAdmin.POST("/projects/:id/tokens", h.AdminMCP.IssueToken)
+			mcpAdmin.DELETE("/projects/:id/tokens/:tokenId", h.AdminMCP.RevokeToken)
+			mcpAdmin.GET("/projects/:id/tokens/:tokenId/secret", h.AdminMCP.TokenSecret)
+		}
 
 		// 存储配置（素材存到哪）：读 = admin 或 super_admin；测试 / 创建 / 修改 / 换密钥 / 设默认 / 删除 = 仅 super_admin。
 		// 密钥只写不读，和渠道 Key 同一套规则。

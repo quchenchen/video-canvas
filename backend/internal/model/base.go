@@ -30,7 +30,6 @@ func All() []any {
 		&AIPlugin{},
 		&AIPluginVersion{},
 		&AIChannel{},
-		&AIChannelKey{},
 		&AIModel{},
 		&AIConfigRevision{},
 		&AISecret{},
@@ -86,5 +85,8 @@ func All() []any {
 		&MarketingScript{},
 		&StoryboardSplitJob{},
 		&CanvasComposeJob{},
+		&AIChannelKey{},
+		&MCPProject{},
+		&MCPProjectToken{},
 	}
 }

@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { User } from "lucide-react";
+import { Cable, User } from "lucide-react";
 import { useNavigate } from "react-router";
 
 import { NavUser } from "@/components/admin-ui/nav-user";
@@ -32,6 +32,11 @@ export function SidebarAccount({ children }: { children?: ReactNode }) {
       <DropdownMenuItem onClick={() => navigate("/profile")}>
         <User />
         个人中心
+      </DropdownMenuItem>
+      {/* 任何用户都能给自己开接入：外部 AI 工具读写自己名下的画布，不用等管理员 */}
+      <DropdownMenuItem onClick={() => navigate("/mcp")}>
+        <Cable />
+        我的 MCP 接入
       </DropdownMenuItem>
       {children}
     </NavUser>

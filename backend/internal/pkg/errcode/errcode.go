@@ -335,3 +335,14 @@ var (
 	ErrVirtualHumanRetryInvalid   = New(69011, "只有备案失败的图片可以重新提交", http.StatusConflict)
 	ErrVirtualHumanLimit          = New(69012, "真人数量已达上限", http.StatusConflict)
 )
+
+// 画布 MCP 接入 62xxx：外部 AI 工具通过标准协议访问画布
+var (
+	// ErrMCPTokenInvalid 统一回一句话，不区分不存在、已注销、已过期、项目停用还是归属用户被禁用，免得被拿来探测。
+	ErrMCPTokenInvalid    = New(62001, "MCP 令牌无效、已过期或已停用", http.StatusUnauthorized)
+	ErrMCPProjectNotFound = New(62002, "MCP 项目不存在", http.StatusNotFound)
+	ErrMCPTokenNotFound   = New(62003, "MCP 令牌不存在", http.StatusNotFound)
+	ErrMCPCanvasDenied    = New(62004, "这个 MCP 项目没有该画布的访问权限", http.StatusForbidden)
+	ErrMCPScopeDenied     = New(62005, "这个 MCP 项目没有该能力的权限", http.StatusForbidden)
+	ErrMCPToolDenied      = New(62006, "这个能力不对外开放", http.StatusForbidden)
+)
