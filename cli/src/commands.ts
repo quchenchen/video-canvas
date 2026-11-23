@@ -1911,23 +1911,50 @@ async function ensureAgentSession(ctx: Ctx, code: string): Promise<AgentSessionV
 /** 一条事件的人类可读形态：回复原文输出，审批把 payload 原样摊开，工具调用给一行摘要。 */
 function formatAgentEvent(e: AgentEventView): string {
   const data = (e.data ?? {}) as Record<string, unknown>;
-  if (e.type.startsWith("approval.")) {
+  if (e.type === "approval.created") {
     const id = typeof data.id === "string" ? data.id : "";
-    const payload = data.payload ?? {};
-    return [
-      `⚠ ${e.type}${id ? `（审批编号 ${id}）` : ""}`,
-      JSON.stringify(payload, null, 2),
-      id ? `  批准：vc agent approve ${id} --items 0,1,2` : "",
-      id ? `  驳回：vc agent approve ${id} --reject` : "",
-    ]
-      .filter(Boolean)
-      .join("\n");
+    const payload = (data.payload ?? {}) as Record<string, unknown>;
+    const items = Array.isArray(payload.items) ? payload.items : [];
+    const lines = [`⚠ 需要你确认${id ? `（审批编号 ${id}）` : ""}`];
+    if (typeof payload.reason === "string" && payload.reason) lines.push(`  理由：${payload.reason}`);
+    items.forEach((raw, i) => {
+      const item = (raw ?? {}) as Record<string, unknown>;
+      const label =
+        (typeof item.label === "string" && item.label) ||
+        (typeof item.node_id === "string" ? item.node_id : "") ||
+        "（未命名动作）";
+      const model =
+        (typeof item.model_name === "string" && item.model_name) ||
+        (typeof item.model_key === "string" ? item.model_key : "");
+      const count = typeof item.count === "number" ? item.count : 1;
+      const price = typeof item.price === "number" ? item.price : 0;
+      const cost = price > 0 ? ` · 约 ${price * count} 积分` : "";
+      lines.push(`  [${i}] ${label}${model ? ` · ${model}` : ""} ×${count}${cost}`);
+    });
+    if (id) {
+      const all = items.map((_, i) => i).join(",");
+      lines.push(`  全部批准：vc agent approve ${id}${items.length ? ` --items ${all}` : ""}`);
+      if (items.length > 1) lines.push(`  只批一条：vc agent approve ${id} --items 0`);
+      lines.push(`  全部驳回：vc agent approve ${id} --reject`);
+    }
+    return lines.join("\n");
+  }
+  // 同一次审批的「已处理」：别把它再渲染成一遍「需要确认」，那会让人以为有两件事要批。
+  if (e.type === "approval.decided") {
+    const status = typeof data.status === "string" ? data.status : "";
+    const kind = typeof data.kind === "string" ? data.kind : "";
+    const label = status === "rejected" ? "已驳回" : status === "approved" ? "已批准" : status || "已处理";
+    return `  · 审批${label}${kind ? `（${kind}）` : ""}`;
   }
   // 助手的回答就是这轮要的东西，原样输出，不截断。
   const text = typeof data.text === "string" ? data.text.trim() : "";
   if (e.type === "message.done") return text ? `\n${text}\n` : "";
-  // 状态与用量是给机器看的，人类模式不刷屏。
-  if (e.type === "run.status" || e.type === "run.usage" || e.type === "message.user") return "";
+  // 用量只报花了多少积分，其余状态不刷屏。
+  if (e.type === "run.usage") {
+    const spent = typeof data.spent_credits === "number" ? data.spent_credits : 0;
+    return spent > 0 ? `  · 本轮花费 ${spent} 积分` : "";
+  }
+  if (e.type === "run.status" || e.type === "message.user") return "";
   const name = typeof data.name === "string" ? data.name : "";
   const summary = typeof data.summary === "string" ? data.summary : "";
   const label = typeof data.label === "string" ? data.label : "";
@@ -1937,7 +1964,7 @@ function formatAgentEvent(e: AgentEventView): string {
 
 /** 这条事件是否表示「可以收尾了」：有正文的回复、需要人拍板、或运行已经结束。 */
 function agentSettled(e: AgentEventView): boolean {
-  if (e.type.startsWith("approval.") || e.type === "run.finished" || e.type === "run.failed") return true;
+  if (e.type === "approval.created" || e.type === "run.finished" || e.type === "run.failed") return true;
   if (e.type !== "message.done") return false;
   const data = (e.data ?? {}) as Record<string, unknown>;
   return typeof data.text === "string" && data.text.trim() !== "";
