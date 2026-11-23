@@ -20,6 +20,7 @@ import (
 	"video-canvas/internal/config"
 	"video-canvas/internal/handler"
 	agenthandler "video-canvas/internal/handler/agent"
+	mcphandler "video-canvas/internal/handler/mcp"
 	"video-canvas/internal/llmgateway"
 	"video-canvas/internal/llmgateway/llmlog"
 	"video-canvas/internal/mailer"
@@ -366,6 +367,38 @@ func NewApp(cfg *config.Config) (*App, error) {
 	if agentProxy != nil {
 		agentProxy.WithRoleLookup(roleLookup)
 	}
+	// MCP 接入：项目与令牌的后台管理 + 对外端点。工具执行复用画布 Agent 的 bridge，
+	// 所以对外接入不可能绕过内置 Agent 的任何限制；Agent 没启用时端点不注册。
+	mcpSvc := service.NewMCPProjectService(service.MCPProjectDeps{
+		Repo: repository.NewMCPRepository(db), Users: userRepo, Canvases: canvasProjectRepo, Audit: auditRepo,
+		// 令牌明文用凭证主密钥加密保存（列表里「复制」要解出来）；默认有效期取后台「注册设置」
+		SecretKey: cfg.AI.SecretKey, Defaults: settingsSvc,
+	})
+	var mcpServer *mcphandler.Server
+	if agentRT != nil && agentRT.bridge != nil {
+		mcpServer = mcphandler.NewServer(agentRT.bridge, canvasProjectRepo)
+		// drama_list 用：画布列表刻意排除短剧，外部工具得能自己发现短剧画布
+		mcpServer.SetDramaDirectory(dramaRepo)
+		// 单次调用上限取后台「注册设置」，读不到就用默认 60 秒
+		mcpServer.SetCallTimeout(func(ctx context.Context) time.Duration {
+			d, err := settingsSvc.MCPCallTimeout(ctx)
+			if err != nil {
+				return 0
+			}
+			return d
+		})
+	}
+	mcpAuth := func(ctx context.Context, plain string) (middleware.MCPIdentity, error) {
+		who, err := mcpSvc.Authenticate(ctx, plain)
+		if err != nil {
+			return middleware.MCPIdentity{}, err
+		}
+		return middleware.MCPIdentity{
+			ProjectID: who.ProjectID, UserID: who.UserID,
+			DefaultCanvasID: who.DefaultCanvasID, Scopes: who.Scopes,
+		}, nil
+	}
+
 	engineHTTP := router.New(cfg.Server.Mode, cfg.JWT.Secret, router.Handlers{
 		PricingSettings: handler.NewPricingSettingsHandler(pricingSvc),
 		AgentProxy:      agentProxy,
@@ -392,6 +425,10 @@ func NewApp(cfg *config.Config) (*App, error) {
 		Conversation: handler.NewConversationHandler(service.NewConversationService(repository.NewConversationRepository(db), taskSvc)),
 		AgentSkill:   agenthandler.NewSkillHandler(skillSvc),
 		AgentObserve: agenthandler.NewAgentObserveHandler(observeSvc),
+		MCP:          mcpServer,
+		MCPAuth:      mcpAuth,
+		AdminMCP:     handler.NewMCPAdminHandler(mcpSvc),
+		MCPMe:        handler.NewMCPSelfHandler(mcpSvc),
 		AnalysisToken: func(ctx context.Context, plain string) (uint64, uint64, error) {
 			who, err := observeSvc.AuthenticateToken(ctx, plain)
 			if err != nil {

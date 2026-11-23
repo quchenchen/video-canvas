@@ -85,5 +85,7 @@ func All() []any {
 		&MarketingScript{},
 		&StoryboardSplitJob{},
 		&CanvasComposeJob{},
+		&MCPProject{},
+		&MCPProjectToken{},
 	}
 }
