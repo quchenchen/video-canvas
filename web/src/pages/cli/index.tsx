@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { BookOpen, Terminal } from "lucide-react";
 import { Link } from "react-router";
 
@@ -18,6 +18,7 @@ import {
   PageHeaderHeading,
   PageHeaderTitle,
 } from "@/components/admin-ui/page-header";
+import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import { cliApiBase, cliSiteRoot } from "@/utils/cli/api-base";
 
@@ -33,12 +34,19 @@ export default function CLIPage() {
   // 不写死任何一个域名，也不假设页面地址就是接口地址。
   const apiBase = cliApiBase(import.meta.env.VITE_API_BASE_URL);
   const siteRoot = cliSiteRoot(import.meta.env.VITE_API_BASE_URL);
+  const release = useCLIRelease(apiBase);
 
-  const install = `# 在连镜仓库根目录执行一次（需要 Node 18+）
-npm i -g ./cli
+  // 三条安装路径都指向**当前站点**：CLI 没有发布到 npm，包只能由本站提供。
+  // 地址按运行时算，换域名、走内网、挂反代前缀都不用改这里。
+  const installUnix = `# macOS / Linux：装到 ~/.local，之后可以直接敲 vc
+curl -fsSL ${siteRoot}/api/v1/cli/install.sh | sh`;
 
-# 不想全局安装，就直接用 node 跑
-node ./cli/bin/vc.mjs --help`;
+  const installWindows = `# Windows PowerShell：装到 %LOCALAPPDATA%，并写入用户 PATH
+irm ${siteRoot}/api/v1/cli/install.ps1 | iex`;
+
+  const installManual = `# 不想执行脚本就手动下包（解压后 node <目录>/bin/vc.mjs 即可运行）
+curl -fsSL ${siteRoot}/api/v1/cli/download?os=unix -o video-canvas-cli.tgz   # macOS / Linux
+curl -fsSL ${siteRoot}/api/v1/cli/download?os=windows -o video-canvas-cli.zip # Windows`;
 
   const login = `# 打印用户码并自动打开浏览器，在网页上点「允许」
 vc login --base ${apiBase}
@@ -63,10 +71,20 @@ vc task wait <任务ID> --timeout 600   # 阻塞到出结果，超时退出码 1
     <DataPage>
       <PageHeader>
         <PageHeaderHeading>
-          <PageHeaderTitle>命令行（CLI）</PageHeaderTitle>
+          <PageHeaderTitle>
+            命令行（CLI）
+            <Badge variant="outline" className="ml-2 align-middle font-normal">
+              beta
+            </Badge>
+          </PageHeaderTitle>
           <p className="text-muted-foreground mt-1 max-w-3xl text-sm">
             在终端或脚本里读写自己的画布、等生成结果、导运行记录。 与 MCP 接入互不相干： CLI
             不签发也用不到 MCP 令牌。
+          </p>
+          <p className="text-muted-foreground mt-1 max-w-3xl text-xs">
+            当前是 <strong>beta</strong>{" "}
+            渠道：命令名与参数会尽量稳定，但相当一段时间内仍属测试状态，
+            输出格式和提示语可能调整；有变化会写在升级提示旁边。
           </p>
         </PageHeaderHeading>
         <PageHeaderActions>
@@ -110,16 +128,37 @@ vc task wait <任务ID> --timeout 600   # 阻塞到出结果，超时退出码 1
       </Panel>
 
       <Panel title="安装" className="mb-4">
+        <p className="text-muted-foreground text-xs">
+          命令行单独发版，版本号与站点版本无关
+          {release.version ? `：当前 ${release.version}` : ""}。 它<strong>没有发布到 npm</strong>
+          ，安装包由本站提供；按系统选一条执行即可（需要 Node 18 及以上，脚本会先检查）。
+        </p>
         <CopyBlock>
           <CopyBlockHeader>
-            <CopyBlockTitle>在仓库根目录执行（需要 Node 18 及以上）</CopyBlockTitle>
-            <CopyButton text={install} />
+            <CopyBlockTitle>macOS / Linux</CopyBlockTitle>
+            <CopyButton text={installUnix} />
           </CopyBlockHeader>
-          <CopyBlockCode>{install}</CopyBlockCode>
+          <CopyBlockCode>{installUnix}</CopyBlockCode>
+        </CopyBlock>
+        <CopyBlock>
+          <CopyBlockHeader>
+            <CopyBlockTitle>Windows（PowerShell）</CopyBlockTitle>
+            <CopyButton text={installWindows} />
+          </CopyBlockHeader>
+          <CopyBlockCode>{installWindows}</CopyBlockCode>
+        </CopyBlock>
+        <CopyBlock>
+          <CopyBlockHeader>
+            <CopyBlockTitle>手动下载</CopyBlockTitle>
+            <CopyButton text={installManual} />
+          </CopyBlockHeader>
+          <CopyBlockCode>{installManual}</CopyBlockCode>
         </CopyBlock>
         <p className="text-muted-foreground text-xs">
-          装好后有两个等价的命令名：<code>vc</code> 和 <code>video-canvas-cli</code>。 CLI
-          目前随仓库分发，没有发布到 npm。
+          装好后有两个等价的命令名：<code>vc</code> 和 <code>video-canvas-cli</code>。
+          升级就是重跑同一条安装命令（脚本向服务端要最新版本）；卸载删掉{" "}
+          <code>~/.local/share/video-canvas-cli</code>（Windows 是{" "}
+          <code>%LOCALAPPDATA%\video-canvas-cli</code>）与 PATH 里的两个链接即可。
         </p>
       </Panel>
 
@@ -206,6 +245,29 @@ function Panel({
       {children}
     </section>
   );
+}
+
+/**
+ * 读服务端的 CLI 发行信息，只为在页面上显示「当前版本」。
+ * 它和安装脚本读的是同一个接口，所以界面上的版本号不会与包体不一致。
+ * 拿不到（老部署没有这个接口）就什么都不显示——安装命令本身仍然可用。
+ */
+function useCLIRelease(apiBase: string): { version: string | null } {
+  const [version, setVersion] = useState<string | null>(null);
+  useEffect(() => {
+    let alive = true;
+    fetch(`${apiBase}/cli/release`, { headers: { accept: "application/json" } })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((body: { data?: { version?: string } } | null) => {
+        const next = body?.data?.version;
+        if (alive && typeof next === "string" && next) setVersion(next);
+      })
+      .catch(() => setVersion(null));
+    return () => {
+      alive = false;
+    };
+  }, [apiBase]);
+  return { version };
 }
 
 /** 对比表的一行。 */

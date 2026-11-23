@@ -27,6 +27,9 @@ WORKDIR /app
 RUN apk add --no-cache ffmpeg && addgroup -S app && adduser -S -G app app
 COPY --from=build /out/server /app/server
 COPY --from=build /src/configs/config.yaml /app/configs/config.yaml
+# 命令行安装包由 backend 现场打包下发（/api/v1/cli/download），所以镜像里要带上 cli 源码。
+# 构建上下文是仓库根目录，这里直接按根路径拷；版本取自 cli/package.json。
+COPY cli/ /app/cli/
 # /run/plugin-runner 是 backend 与 plugin-runner 容器共享 Unix socket 的卷挂载点，首次挂载时命名卷继承这里的属主
 # /app/logs 预先建好并交给 app 用户：命名卷首次挂载时继承这个属主，否则日志写不进去
 RUN mkdir -p /app/data/assets /app/logs /run/plugin-runner && chown -R app:app /app /run/plugin-runner
