@@ -18,6 +18,7 @@ type BaseModel struct {
 func All() []any {
 	return []any{
 		&User{},
+		&CLIDeviceCode{},
 		&CanvasProject{},
 		&GenerationTask{},
 		&GenerationTaskEvent{},
@@ -30,7 +31,6 @@ func All() []any {
 		&AIPlugin{},
 		&AIPluginVersion{},
 		&AIChannel{},
-		&AIChannelKey{},
 		&AIModel{},
 		&AIConfigRevision{},
 		&AISecret{},
@@ -85,5 +85,9 @@ func All() []any {
 		&MarketingStepRun{},
 		&MarketingScript{},
 		&StoryboardSplitJob{},
+		&CanvasComposeJob{},
+		&AIChannelKey{},
+		&MCPProject{},
+		&MCPProjectToken{},
 	}
 }

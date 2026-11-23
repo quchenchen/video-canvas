@@ -14,6 +14,8 @@ import AgentSkillsPage from "@/pages/admin/agent-skills";
 import SkillDetailRedirect from "@/pages/admin/agent-skills/skill-detail";
 import AgentStepsPage from "@/pages/admin/agent-steps";
 import AgentTokensPage from "@/pages/admin/agent-tokens";
+import MCPProjectsPage from "@/pages/admin/mcp-projects";
+import MyMCPPage from "@/pages/mcp";
 import StoragePage from "@/pages/admin/storage";
 import UsersPage from "@/pages/admin/users";
 import PaymentAdminPage from "@/pages/admin/payment";
@@ -28,6 +30,7 @@ import VersionSettingsPage from "@/pages/admin/settings/version-settings";
 import Assets from "@/pages/assets";
 import Canvas from "@/pages/canvas";
 import CanvasList from "@/pages/home/canvas-list";
+import CLIAuthorize from "@/pages/cli/authorize";
 import Conversation from "@/pages/conversation";
 import DramaList from "@/pages/drama";
 import DramaStudio from "@/pages/drama/studio";
@@ -107,6 +110,11 @@ export const router = createBrowserRouter([
         element: <RequireAuth />,
         children: [
           {
+            /** 命令行登录的授权页：全屏，不带首页侧栏 */
+            path: "cli/authorize",
+            element: <CLIAuthorize />,
+          },
+          {
             /** 首页和所有画布共用侧栏 + 顶栏 */
             element: <HomeLayout />,
             children: [
@@ -119,6 +127,8 @@ export const router = createBrowserRouter([
               { path: "conversations/new", element: <Navigate to="/" replace /> },
               { path: "conversations/:id", element: <Conversation /> },
               { path: "profile", element: <Profile /> },
+              /** 我的 MCP 接入：任何登录用户都能给自己开，不必找管理员 */
+              { path: "mcp", element: <MyMCPPage /> },
             ],
           },
           {
@@ -176,6 +186,7 @@ export const router = createBrowserRouter([
               { path: "agent/steps", element: <AgentStepsPage /> },
               { path: "agent/runs", element: <AgentRunsPage /> },
               { path: "agent/tokens", element: <AgentTokensPage /> },
+              { path: "agent/mcp", element: <MCPProjectsPage /> },
               { path: "users", element: <UsersPage /> },
               { path: "payment", element: <PaymentAdminPage /> },
               { path: "usage", element: <UsagePage /> },
