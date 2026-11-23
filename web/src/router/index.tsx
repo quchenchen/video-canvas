@@ -30,6 +30,9 @@ import VersionSettingsPage from "@/pages/admin/settings/version-settings";
 import Assets from "@/pages/assets";
 import Canvas from "@/pages/canvas";
 import CanvasList from "@/pages/home/canvas-list";
+import CLIAuthorize from "@/pages/cli/authorize";
+import CLIDocsPage from "@/pages/cli/docs";
+import CLIPage from "@/pages/cli";
 import Conversation from "@/pages/conversation";
 import DramaList from "@/pages/drama";
 import DramaStudio from "@/pages/drama/studio";
@@ -123,6 +126,9 @@ export const router = createBrowserRouter([
               { path: "profile", element: <Profile /> },
               /** 我的 MCP 接入：任何登录用户都能给自己开，不必找管理员 */
               { path: "mcp", element: <MyMCPPage /> },
+              /** 命令行（CLI）：与 MCP 分开的独立接入页，用户与后台共用同一个组件 */
+              { path: "cli", element: <CLIPage /> },
+              { path: "cli/docs", element: <CLIDocsPage /> },
             ],
           },
           {
@@ -181,6 +187,8 @@ export const router = createBrowserRouter([
               { path: "agent/runs", element: <AgentRunsPage /> },
               { path: "agent/tokens", element: <AgentTokensPage /> },
               { path: "agent/mcp", element: <MCPProjectsPage /> },
+              { path: "cli", element: <CLIPage /> },
+              { path: "cli/docs", element: <CLIDocsPage /> },
               { path: "users", element: <UsersPage /> },
               { path: "payment", element: <PaymentAdminPage /> },
               { path: "usage", element: <UsagePage /> },
