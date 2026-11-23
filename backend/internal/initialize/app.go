@@ -236,6 +236,8 @@ func NewApp(cfg *config.Config) (*App, error) {
 	})
 	// 生成任务的关联业务观察者：短剧片段和营销脚本各按节点前缀认领自己的任务；短剧画布上的故事板图片任务由片段服务认领。
 	taskSvc.SetTaskObserver(service.TaskObservers{dramaSegments, marketingSvc})
+	// 任务终态写回画布节点：不依赖浏览器在线，命令行 / MCP / 无人值守提交的产物同样落在节点上。
+	taskSvc.SetCanvasNodeBackfill(service.NewCanvasNodeBackfill(canvasProjectRepo, hub))
 	// 分镜表拆分镜：异步任务，提交、worker 执行和推送都在这个服务里；队列晚于它创建，入队器稍后回填到仓储
 	storyboardSvc := service.NewStoryboardService(service.StoryboardDeps{
 		Repo: storyboardRepo, Models: aiCfgSvc, Caller: stepCaller, Credits: settingsSvc, Broadcaster: hub,

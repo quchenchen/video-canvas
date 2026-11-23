@@ -250,7 +250,19 @@ func (s *GenerationTaskService) Complete(ctx context.Context, t *model.Generatio
 	}
 	s.publish(ctx, updated)
 	s.writeCanvasCover(ctx, updated, outputs)
+	s.writeCanvasNode(ctx, updated, outputs)
 	return true, nil
+}
+
+// writeCanvasNode 把任务终态写回所属画布的节点：跑完即写，不依赖浏览器在线。
+// 失败只记日志——任务与积分已经提交，不能因为回写失败把它算成失败。
+func (s *GenerationTaskService) writeCanvasNode(ctx context.Context, t *model.GenerationTask, outputs []model.TaskOutput) {
+	if s.nodeBackfill == nil {
+		return
+	}
+	if err := s.nodeBackfill.BackfillNode(ctx, t, outputs); err != nil {
+		logger.Warn("写回画布节点失败", logger.GenRun(t.ID), zap.Error(err))
+	}
 }
 
 // writeCanvasCover 任务成功后，把产出里第一张图写成所属画布的封面（画布已有封面则不动，所以封面是画布里第一张图）。
@@ -304,6 +316,7 @@ func (s *GenerationTaskService) FailWithUpstream(ctx context.Context, t *model.G
 		return false, err
 	}
 	s.publish(ctx, updated)
+	s.writeCanvasNode(ctx, updated, nil)
 	return true, nil
 }
 
@@ -403,6 +416,7 @@ func (s *GenerationTaskService) cancel(ctx context.Context, userID, id uint64, f
 	}
 	s.cancelProvider(ctx, updated)
 	s.publish(ctx, updated)
+	s.writeCanvasNode(ctx, updated, nil)
 	return taskView(updated), nil
 }
 
