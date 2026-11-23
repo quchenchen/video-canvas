@@ -27,10 +27,11 @@ WORKDIR /app
 RUN apk add --no-cache ffmpeg && addgroup -S app && adduser -S -G app app
 COPY --from=build /out/server /app/server
 COPY --from=build /src/configs/config.yaml /app/configs/config.yaml
-# 命令行安装包由 backend 现场打包下发（/api/v1/cli/download），所以镜像里要带上 cli 的构建产物。
-# 源码是 TypeScript（cli/src/*.ts），打包用的是 tsc 产出的 cli/dist/*.js——镜像里不需要 Node，
-# 打包只是读文件；但 dist 必须在，否则装出来的 vc 没有代码可跑。
-COPY cli/ /app/cli/
+# 命令行安装包由 backend 现场打包下发（/api/v1/cli/download），镜像里只放「会下发的那几项」：
+# package.json（版本号来源）、README.md、dist/（tsc 产物）。源码、测试、tsconfig、锁文件都不进镜像——
+# 容器只读这几个文件打包，多带一份就多一处与源码不同步的东西。镜像里没有 Node 也能打包。
+COPY cli/package.json cli/README.md /app/cli/
+COPY cli/dist/ /app/cli/dist/
 RUN test -f /app/cli/dist/cli.js \
     || (echo "错误：cli/dist 缺失。先在 cli/ 里 npm ci && npm run build 再构建镜像" >&2; exit 1)
 # /run/plugin-runner 是 backend 与 plugin-runner 容器共享 Unix socket 的卷挂载点，首次挂载时命名卷继承这里的属主
