@@ -93,7 +93,7 @@ const USAGE = `video-canvas-cli（beta）— 连镜命令行
 
 短剧（只读与任务控制；建项目、改剧本、跑任务仍在网页里）
   drama list [--keyword 关键词] [--page N] [--page-size N]
-  drama get <短剧编号>
+  drama get <短剧编号> [--episodes 10]          默认只列前 10 集，0 表示全部
   drama units <短剧编号> [--from 1] [--to 20]
   drama unit <短剧编号> <单元号>
   drama jobs <短剧编号> [--active]

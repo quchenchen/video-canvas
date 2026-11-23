@@ -55,7 +55,7 @@
 
 短剧（只读与任务控制）
   drama list [--keyword 关键词] [--page N] [--page-size N]
-  drama get <短剧编号>
+  drama get <短剧编号> [--episodes 10]          默认只列前 10 集，0 表示全部
   drama units <短剧编号> [--from 1] [--to 20]
   drama unit <短剧编号> <单元号>
   drama jobs <短剧编号> [--active]
@@ -152,7 +152,7 @@ curl -fsSL https://你的站点/api/v1/cli/download?os=windows -o video-canvas-c
 ### 自检
 
 ```bash
-vc --version          # video-canvas-cli 0.3.0
+vc --version          # video-canvas-cli 0.3.1
 vc --version --json   # {"ok":true,"data":{...,"node":"v22.22.2","os":"darwin","arch":"x64"}}
 ```
 
@@ -531,14 +531,14 @@ vc canvas compose-cancel <画布编号> --job <任务id>
 短剧在 CLI 里是**只读 + 任务控制**：看项目、看原文单元、看/取消任务。建项目、改写剧本、跑规划与分集任务
 仍然在网页的短剧工作室里做——那些操作要读长上下文、逐步确认，命令行做不合适。
 
-| 命令               | 参数                                 | 说明                                             |
-| ------------------ | ------------------------------------ | ------------------------------------------------ |
-| `drama list`       | `--keyword`、`--page`、`--page-size` | 只要自己的项目；输出 CODE/STATUS/PHASE/集数/锁定 |
-| `drama get`        | `<短剧编号>`                         | 项目设置、大纲、集摘要、进行中的任务             |
-| `drama units`      | `<短剧编号>`、`--from`、`--to`       | 原文单元（按单元号区间），输出 单元号/标题/字数  |
-| `drama unit`       | `<短剧编号>`、`<单元号>`             | 单个单元的正文                                   |
-| `drama jobs`       | `<短剧编号>`、`--active`             | 进行中/历史任务：步骤、状态、进度、集号          |
-| `drama job-cancel` | `<短剧编号>`、`--job <任务id>`       | 取消未落终态的任务                               |
+| 命令               | 参数                                 | 说明                                                    |
+| ------------------ | ------------------------------------ | ------------------------------------------------------- |
+| `drama list`       | `--keyword`、`--page`、`--page-size` | 只要自己的项目；输出 CODE/STATUS/PHASE/集数/锁定        |
+| `drama get`        | `<短剧编号>`、`--episodes 10`        | 项目设置、大纲、集摘要、进行中的任务；集多时只列前 N 集 |
+| `drama units`      | `<短剧编号>`、`--from`、`--to`       | 原文单元（按单元号区间），输出 单元号/标题/字数         |
+| `drama unit`       | `<短剧编号>`、`<单元号>`             | 单个单元的正文                                          |
+| `drama jobs`       | `<短剧编号>`、`--active`             | 进行中/历史任务：步骤、状态、进度、集号                 |
+| `drama job-cancel` | `<短剧编号>`、`--job <任务id>`       | 取消未落终态的任务                                      |
 
 ```bash
 vc drama list

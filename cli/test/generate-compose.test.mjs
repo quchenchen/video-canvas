@@ -144,17 +144,27 @@ async function fakeSite() {
           target_episodes: 12,
           episode_seconds: 60,
           ratio: "9:16",
-          episodes: [{ no: 1, title: "第一集", unit_from: 1, unit_to: 4, script_status: "draft" }],
+          // 12 集：默认只列前 10 集，验证不会把整季刷满终端
+          episodes: Array.from({ length: 12 }, (_, i) => ({
+            no: i + 1,
+            title: `第${i + 1}集`,
+            unit_from: i + 1,
+            unit_to: i + 1,
+            script_status: "draft",
+          })),
         },
       });
     }
     if (req.method === "GET" && p === "/api/v1/dramas/d1/units") {
+      // 真实接口把列表包在 items 里，不是裸数组；按裸数组解析会得到「(没有单元)」
       return send(res, {
         code: 0,
-        data: [
-          { no: 1, title: "开场", chars: 420 },
-          { no: 2, title: "冲突", chars: 380 },
-        ],
+        data: {
+          items: [
+            { no: 1, title: "开场", chars: 420 },
+            { no: 2, title: "冲突", chars: 380 },
+          ],
+        },
       });
     }
     if (req.method === "GET" && p === "/api/v1/dramas/d1/units/1") {
@@ -173,7 +183,7 @@ async function fakeSite() {
               step: "plan",
               status: "running",
               progress: 40,
-              episodes: [1],
+              episodes: Array.from({ length: 96 }, (_, i) => i + 1),
               lane: "plan",
               credits: 3,
             },
@@ -575,6 +585,11 @@ test("drama：列表、详情、单元、任务四条都是只读", async () => 
     assert.equal(detail.code, 0);
     assert.match(detail.stdout, /单元：40 个/);
     assert.match(detail.stdout, /第 1 集/);
+    // 12 集的短剧默认只列前 10 集（实测 96 集项目会打 175 行）
+    assert.match(detail.stdout, /只列前 10/);
+    assert.doesNotMatch(detail.stdout, /第 12 集  /);
+    const allEpisodes = await run(["drama", "get", "d1", "--episodes", "0"], env);
+    assert.match(allEpisodes.stdout, /第 12 集/);
 
     const units = await run(["drama", "units", "d1"], env);
     assert.equal(units.code, 0);
@@ -588,6 +603,8 @@ test("drama：列表、详情、单元、任务四条都是只读", async () => 
     const jobs = await run(["drama", "jobs", "d1", "--active"], env);
     assert.equal(jobs.code, 0);
     assert.match(jobs.stdout, /JOB\tSTEP\tSTATUS/);
+    // 96 个集号要压缩成区间，否则一行表格被挤成两屏
+    assert.match(jobs.stdout, /1,2,3…95,96（96 集）/);
 
     const cancel = await run(["drama", "job-cancel", "d1", "--job", "j1"], env);
     assert.equal(cancel.code, 0);

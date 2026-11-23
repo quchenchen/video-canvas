@@ -125,7 +125,7 @@ video-canvas-cli canvas compose-cancel <code> --job <任务id>
 
 ```bash
 video-canvas-cli drama list [--keyword 关键词]
-video-canvas-cli drama get <短剧编号>
+video-canvas-cli drama get <短剧编号> [--episodes 10]
 video-canvas-cli drama units <短剧编号> [--from 1] [--to 20]
 video-canvas-cli drama unit <短剧编号> <单元号>
 video-canvas-cli drama jobs <短剧编号> [--active]

@@ -26,6 +26,7 @@
 
 ### 修复
 
+- 命令行短剧命令修两处实测问题：`drama units` 把服务端返回的 `{items}` 当成裸数组，导致「明明有 96 个单元却显示没有单元」；`drama get` 会把整季分集全打出来（96 集项目 175 行），现在默认只列前 10 集（`--episodes 0` 看全部），`drama jobs` 的集号列超过 6 个也收成 `1,2,3…95,96（96 集）`。
 - 发版后打开懒加载页面报 `Failed to fetch dynamically imported module` / `Unexpected Application Error!`：根因是 `index.html` 没有缓存头，浏览器按启发式缓存继续持有旧页面，去要上一版已删除的 chunk，而 nginx 的 SPA 回退又把 404 伪装成 `200 + text/html`，浏览器把 HTML 当 ES module 解析。现在 `index.html` 走 `no-cache`（每次回源校验），`/assets/` 长缓存 `immutable` 且缺失文件返回真 404；前端同时加了自愈——检测到 chunk 失效就整页刷新一次（15 秒冷却，避免真缺文件时无限刷新），路由错误页也不再只显示一句 `Unexpected Application Error`。
 - 多 Key 的任务级绑定之前没真正落库：合并插件状态时漏了槽位字段，导致查询、取消可能换用另一把 Key，上游按 Key 隔离时会查不到自己提交的任务。现在槽位随任务保存，轮询不会把它清掉。
 - Agnes 图片插件读不到清晰度档位（宿主按模型配置传的是 `resolution`，插件只认老的 `size`），选 2K / 3K / 4K 实际都出 1K，现已兼容两个字段名。
