@@ -63,7 +63,26 @@ video-canvas-cli canvas save <code> --payload graph.json [--revision N]
 
 `export` 不给 `-o` 时默认写当前目录的 `canvas-<编号>.json`，在项目目录里跑记得显式指定。
 
-`canvas save` 走整图保存 + `revision` 乐观锁：不给 `--revision` 就先读一次当前版本。节点级增量操作请用 Agent 会话或平台桥的 `canvas_apply_ops`，CLI 这一层刻意不复制那套语义。
+`canvas save` 走整图保存 + `revision` 乐观锁：不给 `--revision` 就先读一次当前版本。
+
+## 节点级编辑
+
+只提交差异，由服务端按与 Agent 相同的图语义应用，CLI 不自己拼图。**每次都要在终端里确认**：
+
+```bash
+video-canvas-cli canvas node add <code> --kind script --label "旁白" --text "第一句"
+video-canvas-cli canvas node add <code> --kind image --label "关键帧1" --prompt "草原上的风机" --at 600,100
+video-canvas-cli canvas node set <code> <节点id> --label "新标题"
+video-canvas-cli canvas node rm <code> <节点id>
+```
+
+- 能建的种类只有 `script` / `image` / `video` / `audio`；角色卡、分镜表、成片、导演台要在画面上建。
+- 文本节点的正文用 `--text`（服务端写进节点正文），其它节点的提示词用 `--prompt`。
+- `rm` 会连带清理连线、分镜里的挂接、成片顺序，由服务端统一处理。
+- 流程是「读当前图 → 逐行列出要改什么 → 等你输入 yes → 带同一个 revision 提交」。
+  确认期间画布被别人改了，服务端返回 409，不会覆盖你没看过的版本。
+- **没有 `--yes` 之类的旁路，也不能和 `--json` 一起用**：脚本无法在无人确认时做节点级修改。
+  要用脚本批量改，走 `canvas graph` + `canvas save`。
 
 ## 生成任务
 
@@ -76,6 +95,7 @@ video-canvas-cli task wait <id|task_ref> [--timeout 600] [--interval 3]
 
 - 任务**失败**终态：`ok:false` + 退出码 1。
 - **等待超时**：退出码 3，任务可能还在跑，用 `task get` 继续查。别把超时当失败重跑，会白烧积分。
+- `task_ref` 是任务 id 的 32 位十六进制编码，画布界面与日志里显示的就是它。
 
 ## 运行记录
 
@@ -95,7 +115,8 @@ video-canvas-cli trace compare --by harness_key --since 30d
 ## 输出与退出码
 
 - 默认人类可读；加 `--json` 输出 `{"ok":true,"data":...}`，失败输出 `{"ok":false,"error":{"code":...,"message":...}}`。
-- 退出码：`0` 成功，`1` 业务/网络错误或任务失败，`2` 用法错误，`3` `task wait` 等待超时。
+- 退出码：`0` 成功，`1` 业务/网络错误或任务失败，`2` 用法错误，`3` `task wait` 等待超时，
+  `4` 节点级修改被取消。
 
 ## 权限边界
 
