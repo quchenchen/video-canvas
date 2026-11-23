@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -347,5 +348,70 @@ func TestMCPGenerateToolDescribesExternalSemantics(t *testing.T) {
 	}
 	if _, has := props["canvas"]; !has {
 		t.Fatal("生成落在画布节点上，schema 里应该有 canvas")
+	}
+}
+
+// TestMCPDramaToolsAreIndependentScope 短剧是独立能力域：drama:* 决定能看到哪些短剧工具，
+// 而且不需要同时开画布权限——短剧画布本来就不在 canvas_list 里。
+func TestMCPDramaToolsAreIndependentScope(t *testing.T) {
+	toolsFor := func(scopes ...string) []string {
+		r := newMCPRouter(&mcpStubTools{}, &mcpStubCanvases{}, 7, 0, scopeSet(scopes...))
+		resp := postMCP(t, r, `{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}`)
+		res, ok := resp["result"].(map[string]any)
+		if !ok {
+			t.Fatalf("tools/list 没回 result：%v", resp)
+		}
+		list, _ := res["tools"].([]any)
+		out := make([]string, 0, len(list))
+		for _, item := range list {
+			tool, _ := item.(map[string]any)
+			name, _ := tool["name"].(string)
+			out = append(out, name)
+		}
+		return out
+	}
+	has := func(names []string, want string) bool { return slices.Contains(names, want) }
+
+	read := toolsFor(model.MCPScopeDramaRead)
+	if !has(read, "drama_list") || !has(read, "drama_read") {
+		t.Fatalf("勾读短剧就该能发现短剧并读内容，得到 %v", read)
+	}
+	if has(read, "drama_update_outline") || has(read, "drama_run_job") {
+		t.Fatalf("只勾读短剧不该看到改剧本与跑任务，得到 %v", read)
+	}
+	if has(read, "canvas_get_state") {
+		t.Fatalf("读短剧不该顺带给出画布权限，得到 %v", read)
+	}
+
+	write := toolsFor(model.MCPScopeDramaWrite)
+	for _, want := range []string{"drama_list", "drama_read", "drama_update_outline", "drama_update_episode", "drama_update_segment"} {
+		if !has(write, want) {
+			t.Fatalf("改剧本应该能看到 %s，得到 %v", want, write)
+		}
+	}
+	if has(write, "drama_run_job") {
+		t.Fatalf("改剧本不该连带跑任务（花钱的一档要单独勾），得到 %v", write)
+	}
+
+	run := toolsFor(model.MCPScopeDramaRun)
+	if !has(run, "drama_run_job") || !has(run, "drama_read") {
+		t.Fatalf("跑任务应该带读短剧，得到 %v", run)
+	}
+
+	// 没勾短剧就一个短剧工具都不该出现——包括 drama_list。
+	for _, name := range toolsFor(model.MCPScopeCanvasRead) {
+		if strings.HasPrefix(name, "drama") {
+			t.Fatalf("没勾短剧却看到了 %s", name)
+		}
+	}
+}
+
+// TestMCPDramaToolsRequireCanvas 短剧工具必须落在具体短剧画布上：没指定也没默认画布时给可执行提示。
+func TestMCPDramaToolsRequireCanvas(t *testing.T) {
+	r := newMCPRouter(&mcpStubTools{}, &mcpStubCanvases{}, 7, 0, scopeSet(model.MCPScopeDramaRead))
+	resp := postMCP(t, r, `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"drama_read","arguments":{"scope":"overview"}}}`)
+	text, isErr := resultText(t, resp)
+	if !isErr || !strings.Contains(text, "canvas") {
+		t.Fatalf("没指定画布应回可执行提示，得到 %q isError=%v", text, isErr)
 	}
 }
