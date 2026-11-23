@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Cable, Terminal, User } from "lucide-react";
+import { User } from "lucide-react";
 import { useNavigate } from "react-router";
 
 import { NavUser } from "@/components/admin-ui/nav-user";
@@ -34,23 +34,9 @@ export function SidebarAccount({ children }: { children?: ReactNode }) {
         个人中心
       </DropdownMenuItem>
       {/*
-        这两项是给普通用户的入口。管理员在后台侧栏已经有「MCP 接入」和「命令行（CLI）」，
-        账号菜单里再出现一遍就是重复，所以只对非管理员显示。
+        接入类入口（MCP、命令行）一律不进账号菜单：管理员在后台侧栏有，普通用户由管理员开通后
+        直接访问对应地址，菜单里堆快捷方式只会让「个人中心」这一项变得指代不清。
       */}
-      {!isAdmin && (
-        <>
-          {/* 任何用户都能给自己开接入：外部 AI 工具读写自己名下的画布，不用等管理员 */}
-          <DropdownMenuItem onClick={() => navigate("/mcp")}>
-            <Cable />
-            我的 MCP 接入
-          </DropdownMenuItem>
-          {/* 命令行是独立于 MCP 的另一条接入方式，安装说明在自己那页 */}
-          <DropdownMenuItem onClick={() => navigate("/cli")}>
-            <Terminal />
-            命令行（CLI）
-          </DropdownMenuItem>
-        </>
-      )}
       {children}
     </NavUser>
   );
