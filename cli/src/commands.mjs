@@ -13,7 +13,48 @@ const TERMINAL_TASK_STATUSES = new Set(["succeeded", "failed", "canceled", "expi
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
- * 轻量参数解析：`--key value` / `--key=value` / `--flag`。
+ * 短选项别名。只登记确实有文档承诺的那几个；其余 `-x` 原样留给 positional，
+ * 这样 `trace` 透传给 agent-trace 的参数不会被 CLI 吞掉。
+ */
+const SHORT_FLAGS = { o: "output" };
+
+/**
+ * 下一个 token 是不是「另一个选项」而不是值。
+ * 负数（`-1`）和单个 `-`（stdout 约定）都算值，否则 `--page-size -1`、`-o -` 无法表达。
+ */
+function isOptionToken(token) {
+  if (typeof token !== "string") return false;
+  if (token === "-") return false;
+  if (/^-\d/.test(token)) return false;
+  return token.startsWith("-");
+}
+
+/** 取一个必需的字符串型 flag（如 --payload、--title）；无值时给出明确用法。 */
+export function stringFlag(flags, name, usage) {
+  const value = flags[name];
+  if (value === undefined) throw new APIError(-1, usage, 2);
+  if (value === true || typeof value !== "string")
+    throw new APIError(-1, `--${name} 需要字符串值；用法：${usage}`, 2);
+  return value;
+}
+
+/** 校验并转换一个整数值；非法值直接报用法错误，不静默退回默认值。 */
+export function toInt(raw, name, { min = 1, max = Number.MAX_SAFE_INTEGER } = {}) {
+  if (raw === true) throw new APIError(-1, `--${name} 需要一个数字`, 2);
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value < min || value > max)
+    throw new APIError(-1, `--${name} 需要 ${min}–${max} 的整数，收到「${raw}」`, 2);
+  return value;
+}
+
+/** 取一个整数型 flag；没给就用默认值。 */
+export function intFlag(flags, name, fallback, options) {
+  const raw = flags[name];
+  return raw === undefined ? fallback : toInt(raw, name, options);
+}
+
+/**
+ * 轻量参数解析：`--key value` / `--key=value` / `--flag` / `-o value`。
  * CLI 只有几个命令，不值得引入第三方解析器；语义固定，Agent 也容易生成。
  */
 export function parseArgs(argv) {
@@ -33,10 +74,22 @@ export function parseArgs(argv) {
       }
       const name = arg.slice(2);
       const next = argv[i + 1];
-      if (next === undefined || (next.startsWith("-") && next !== "-")) {
+      if (next === undefined || isOptionToken(next)) {
         flags[name] = true;
       } else {
         flags[name] = next;
+        i++;
+      }
+      continue;
+    }
+    // 短选项只认登记过的别名（当前只有 -o → output），其余保持原样
+    const alias = arg.length === 2 && arg[0] === "-" ? SHORT_FLAGS[arg[1]] : undefined;
+    if (alias) {
+      const next = argv[i + 1];
+      if (next === undefined || isOptionToken(next)) {
+        flags[alias] = true;
+      } else {
+        flags[alias] = next;
         i++;
       }
       continue;
@@ -55,20 +108,69 @@ function emit(ctx, data, human) {
   }
 }
 
-/** 读 JSON 文件，失败时给出带路径的错误。 */
+/** 读 JSON 文件；路径写错或内容不是 JSON 都属于用法错误（退出码 2）。 */
 function readJSONFile(file) {
+  if (file === true || typeof file !== "string")
+    throw new APIError(-1, "需要一个 JSON 文件路径", 2);
+  let text;
   try {
-    return JSON.parse(fs.readFileSync(file, "utf8"));
+    text = fs.readFileSync(file, "utf8");
   } catch (err) {
-    throw new APIError(-1, `读取 ${file} 失败：${err.message}`, 0);
+    throw new APIError(-1, `读取 ${file} 失败：${err.message}`, 2);
+  }
+  try {
+    return JSON.parse(text);
+  } catch (err) {
+    throw new APIError(-1, `${file} 不是合法 JSON：${err.message}`, 2);
   }
 }
 
-/** 写文件并返回绝对路径；- 表示写到 stdout 之外不写。 */
-function writeJSONFile(file, value) {
+/**
+ * 写 JSON 文件并返回展示用的路径。
+ * `-` 表示输出到 stdout（与常见 Unix 习惯一致），此时不落盘、也不返回绝对路径。
+ */
+function writeJSONFile(ctx, file, value) {
   const text = `${JSON.stringify(value, null, 2)}\n`;
-  fs.writeFileSync(file, text);
-  return path.resolve(file);
+  if (file === "-") {
+    ctx.stdout(text.trimEnd());
+    return "-";
+  }
+  if (file === true || typeof file !== "string")
+    throw new APIError(-1, "写文件需要给出路径（用 - 表示输出到 stdout）", 2);
+  const target = path.resolve(file);
+  try {
+    fs.writeFileSync(target, text);
+  } catch (err) {
+    throw new APIError(-1, `写入 ${target} 失败：${err.message}`, 0);
+  }
+  return target;
+}
+
+/**
+ * 拒绝把 canvas export 的整份导出文档当成画布 payload 灌进去。
+ * save / create 要的是 canvas graph 的输出（nodes / edges / viewport）；
+ * 导出文档额外带 format / canvas / assets，直接写进去会把画布结构弄坏。
+ */
+function assertGraphPayload(payload, command) {
+  if (payload && typeof payload === "object" && payload.format && payload.canvas) {
+    throw new APIError(
+      -1,
+      `${command} 收到的是 canvas export 的导出文档（含 format / canvas）。` +
+        `要建新画布请用 canvas import；要整图保存请先用 canvas graph 取 nodes 与 edges。`,
+      2,
+    );
+  }
+}
+
+/** 解析 --output / -o；`-` 表示 stdout，且不能与 --json 同时用。 */
+function resolveOutput(ctx, args, fallback, usage) {
+  const raw = args.flags.output !== undefined ? args.flags.output : args.flags.o;
+  if (raw === undefined) return fallback;
+  if (raw === true || typeof raw !== "string")
+    throw new APIError(-1, `--output 需要文件路径（用 - 表示输出到 stdout）；用法：${usage}`, 2);
+  if (raw === "-" && ctx.json)
+    throw new APIError(-1, "--output - 与 --json 冲突：stdout 只能放一种内容", 2);
+  return raw;
 }
 
 /** 尽力打开浏览器；失败静默（用户仍能看到打印的地址）。 */
@@ -86,6 +188,17 @@ function openBrowser(url) {
 function requireToken(ctx) {
   if (!ctx.token) throw new APIError(-1, "还没有登录，先执行 `video-canvas-cli login`", 0);
   return ctx.token;
+}
+
+/**
+ * 取可用的 API 根地址。
+ * 构建 ctx 时就失败过（比如 --base 少了 http://），优先抛那条原始错误——
+ * 直接把 null 拼进 URL 只会得到误导性的「无法连接 null：Invalid URL」。
+ */
+function baseOf(ctx) {
+  if (ctx.base) return ctx.base;
+  if (ctx.baseError) throw ctx.baseError;
+  throw new APIError(-1, "缺少 API 地址，请用 --base 或环境变量 VC_API_BASE 指定", 2);
 }
 
 /** 把当前有效配置（命令行 > 环境变量 > 已保存）解析成 base。 */
@@ -110,11 +223,11 @@ export async function login(ctx, args) {
   });
 
   const url = `${siteRootOf(base)}${start.verification_uri_complete}`;
-  if (!ctx.json) {
-    ctx.stderr(`请在浏览器打开：${url}`);
-    ctx.stderr(`并确认用户码：${start.user_code}`);
-    ctx.stderr(`（已尝试自动打开浏览器；不想自动打开就加 --no-open）`);
-  }
+  // 授权地址始终写 stderr：--json 时 stdout 只留最终一行 JSON，但脚本/用户必须知道去哪儿点确认，
+  // 否则登录会一直等到超时（早期版本就是因为把它关在 !ctx.json 里，--json 登录实际不可用）。
+  ctx.stderr(`请在浏览器打开：${url}`);
+  ctx.stderr(`并确认用户码：${start.user_code}`);
+  ctx.stderr(`（已尝试自动打开浏览器；不想自动打开就加 --no-open）`);
   if (!("no-open" in args.flags)) openBrowser(url);
 
   let interval = Math.max(1, Number(start.interval) || 5) * 1000;
@@ -174,12 +287,13 @@ export async function logout(ctx) {
 /** 当前身份：调 /me 验证令牌仍然有效。 */
 export async function whoami(ctx) {
   const token = requireToken(ctx);
-  const me = await request({ base: ctx.base, token, path: "/me", fetchImpl: ctx.fetchImpl });
+  const base = baseOf(ctx);
+  const me = await request({ base, token, path: "/me", fetchImpl: ctx.fetchImpl });
   const name = me.nickname || me.username;
   emit(
     ctx,
-    { user: me, base: ctx.base },
-    [`用户：${name}（${me.role}）`, `账号：${me.username}`, `接口：${ctx.base}`].join("\n"),
+    { user: me, base },
+    [`用户：${name}（${me.role}）`, `账号：${me.username}`, `接口：${base}`].join("\n"),
   );
 }
 
@@ -200,11 +314,17 @@ function formatCanvasRows(list) {
 
 export async function canvasList(ctx, args) {
   const token = requireToken(ctx);
+  const pageSizeRaw =
+    args.flags["page-size"] !== undefined ? args.flags["page-size"] : args.flags.page_size;
   const page = await request({
-    base: ctx.base,
+    base: baseOf(ctx),
     token,
     path: "/canvas",
-    query: { page: args.flags.page, page_size: args.flags["page-size"] || args.flags.page_size },
+    query: {
+      page: intFlag(args.flags, "page", undefined),
+      page_size:
+        pageSizeRaw === undefined ? undefined : toInt(pageSizeRaw, "page-size", { max: 200 }),
+    },
     fetchImpl: ctx.fetchImpl,
   });
   const list = page.list || [];
@@ -219,7 +339,7 @@ export async function canvasList(ctx, args) {
 async function fetchCanvas(ctx, code) {
   const token = requireToken(ctx);
   return request({
-    base: ctx.base,
+    base: baseOf(ctx),
     token,
     path: `/canvas/${encodeURIComponent(code)}`,
     fetchImpl: ctx.fetchImpl,
@@ -242,13 +362,19 @@ export async function canvasGet(ctx, args) {
 
 export async function canvasCreate(ctx, args) {
   const token = requireToken(ctx);
-  const title = args.flags.title || "未命名画布";
-  const payloadFile = args.flags.payload;
-  const payload = payloadFile
-    ? readJSONFile(payloadFile)
-    : { nodes: [], edges: [], viewport: { x: 0, y: 0, zoom: 1 } };
+  const title =
+    args.flags.title === undefined
+      ? "未命名画布"
+      : stringFlag(args.flags, "title", "canvas create --title <标题> [--payload 文件]");
+  const payload =
+    args.flags.payload === undefined
+      ? { nodes: [], edges: [], viewport: { x: 0, y: 0, zoom: 1 } }
+      : readJSONFile(
+          stringFlag(args.flags, "payload", "canvas create --title <标题> [--payload 文件]"),
+        );
+  assertGraphPayload(payload, "canvas create");
   const canvas = await request({
-    base: ctx.base,
+    base: baseOf(ctx),
     token,
     method: "POST",
     path: "/canvas",
@@ -260,11 +386,11 @@ export async function canvasCreate(ctx, args) {
 
 export async function canvasImport(ctx, args) {
   const token = requireToken(ctx);
-  const file = args.positional[0] || args.flags.file;
-  if (!file) throw new APIError(-1, "用法：canvas import <导出文件.json>", 2);
+  const file = args.positional[0] ?? args.flags.file;
+  if (file === undefined) throw new APIError(-1, "用法：canvas import <导出文件.json>", 2);
   const document = readJSONFile(file);
   const result = await request({
-    base: ctx.base,
+    base: baseOf(ctx),
     token,
     method: "POST",
     path: "/canvas/import",
@@ -288,14 +414,19 @@ export async function canvasExport(ctx, args) {
   const token = requireToken(ctx);
   const code = args.positional[0];
   if (!code) throw new APIError(-1, "用法：canvas export <code> [-o 文件]", 2);
+  const out = resolveOutput(ctx, args, `canvas-${code}.json`, "canvas export <code> [-o 文件]");
   const result = await request({
-    base: ctx.base,
+    base: baseOf(ctx),
     token,
     path: `/canvas/${encodeURIComponent(code)}/export`,
     fetchImpl: ctx.fetchImpl,
   });
-  const out = args.flags.o || args.flags.output || `canvas-${code}.json`;
-  const saved = writeJSONFile(out, result.document ?? result);
+  const document = result.document ?? result;
+  if (out === "-") {
+    ctx.stdout(JSON.stringify(document, null, 2));
+    return;
+  }
+  const saved = writeJSONFile(ctx, out, document);
   emit(
     ctx,
     { file: saved, skipped_assets: result.report?.skipped_assets ?? 0 },
@@ -306,11 +437,15 @@ export async function canvasExport(ctx, args) {
 export async function canvasGraph(ctx, args) {
   const code = args.positional[0];
   if (!code) throw new APIError(-1, "用法：canvas graph <code> [-o 文件]", 2);
+  const out = resolveOutput(ctx, args, undefined, "canvas graph <code> [-o 文件]");
   const canvas = await fetchCanvas(ctx, code);
   const graph = canvas.payload_json || { nodes: [], edges: [], viewport: { x: 0, y: 0, zoom: 1 } };
-  const out = args.flags.o || args.flags.output;
+  if (out === "-") {
+    ctx.stdout(JSON.stringify(graph, null, 2));
+    return;
+  }
   if (out) {
-    const saved = writeJSONFile(out, graph);
+    const saved = writeJSONFile(ctx, out, graph);
     emit(
       ctx,
       { file: saved, revision: canvas.revision },
@@ -329,21 +464,22 @@ export async function canvasGraph(ctx, args) {
 export async function canvasSave(ctx, args) {
   const token = requireToken(ctx);
   const code = args.positional[0];
-  const file = args.flags.payload;
-  if (!code || !file)
-    throw new APIError(-1, "用法：canvas save <code> --payload <文件.json> [--revision N]", 2);
+  const usage = "canvas save <code> --payload <文件.json> [--revision N]";
+  if (!code) throw new APIError(-1, `用法：${usage}`, 2);
+  const file = stringFlag(args.flags, "payload", usage);
   const payload = readJSONFile(file);
-  let revision = args.flags.revision;
+  assertGraphPayload(payload, "canvas save");
+  let revision = intFlag(args.flags, "revision", undefined);
   if (revision === undefined) {
     const current = await fetchCanvas(ctx, code);
     revision = current.revision;
   }
   const canvas = await request({
-    base: ctx.base,
+    base: baseOf(ctx),
     token,
     method: "PUT",
     path: `/canvas/${encodeURIComponent(code)}`,
-    body: { revision: Number(revision), payload_json: payload },
+    body: { revision, payload_json: payload },
     fetchImpl: ctx.fetchImpl,
   });
   emit(ctx, canvas, `已保存，新版本 ${canvas.revision}`);
@@ -358,14 +494,14 @@ async function fetchTask(ctx, idOrRef) {
   const token = requireToken(ctx);
   if (/^\d+$/.test(idOrRef)) {
     return request({
-      base: ctx.base,
+      base: baseOf(ctx),
       token,
       path: `/generation-tasks/${idOrRef}`,
       fetchImpl: ctx.fetchImpl,
     });
   }
   const list = await request({
-    base: ctx.base,
+    base: baseOf(ctx),
     token,
     path: "/generation-tasks",
     query: { ids: idOrRef },
@@ -402,9 +538,9 @@ export async function taskWait(ctx, args) {
   const id = args.positional[0];
   if (!id)
     throw new APIError(-1, "用法：task wait <id|task_ref> [--timeout 600] [--interval 3]", 2);
-  const timeoutMs = Math.max(1, Number(args.flags.timeout) || 600) * 1000;
-  const intervalMs = Math.max(1, Number(args.flags.interval) || 3) * 1000;
-  const deadline = Date.now() + timeoutMs;
+  const timeoutSeconds = intFlag(args.flags, "timeout", 600, { max: 86400 });
+  const intervalSeconds = intFlag(args.flags, "interval", 3, { max: 3600 });
+  const deadline = Date.now() + timeoutSeconds * 1000;
   let last = "";
 
   while (Date.now() < deadline) {
@@ -416,13 +552,37 @@ export async function taskWait(ctx, args) {
       last = task.status;
     }
     if (TERMINAL_TASK_STATUSES.has(task.status)) {
-      emit(ctx, task, formatTask(task));
-      if (task.status !== "succeeded") process.exitCode = 1;
+      if (task.status === "succeeded") {
+        emit(ctx, task, formatTask(task));
+        return;
+      }
+      // 失败终态：JSON 的 ok 必须与退出码一致，否则脚本会看到 ok:true 却拿到退出码 1。
+      if (ctx.json) {
+        ctx.stdout(
+          JSON.stringify({
+            ok: false,
+            error: {
+              code: task.error_code ?? -1,
+              message: task.error_message || `任务${task.status}`,
+            },
+            data: task,
+          }),
+        );
+      } else {
+        ctx.stdout(formatTask(task));
+      }
+      process.exitCode = 1;
       return;
     }
-    await sleep(intervalMs);
+    await sleep(intervalSeconds * 1000);
   }
-  throw new APIError(-1, `等待超时（${timeoutMs / 1000}s），任务仍未结束`, 0);
+  // 超时不是任务失败：用独立退出码 3，脚本才能区分「没等到」和「跑挂了」。
+  throw new APIError(
+    -1,
+    `等待超时（${timeoutSeconds}s），任务仍未结束；可继续用 task get ${id} 查询`,
+    0,
+    3,
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -432,13 +592,12 @@ export async function taskWait(ctx, args) {
 /**
  * 转发到 scripts/agent-trace/agent-trace.mjs 的 pull / show / compare。
  * 不复制实现：那份脚本已被 /agent-review skill 和文档引用，保持单一来源。
+ *
+ * 独立安装包不带 scripts/，所以额外支持 --script 与 VC_AGENT_TRACE；
+ * 都找不到时给出可操作的提示，而不是只说「请在仓库内运行」。
  */
 export function trace(ctx, args) {
-  const here = path.dirname(fileURLToPath(import.meta.url));
-  const script = path.resolve(here, "../../scripts/agent-trace/agent-trace.mjs");
-  if (!fs.existsSync(script)) {
-    throw new APIError(-1, `找不到 agent-trace（${script}），请在仓库内运行`, 0);
-  }
+  const script = resolveTraceScript(ctx, args);
   const child = spawn(process.execPath, [script, ...args.positional, ...flagsToArgv(args.flags)], {
     stdio: "inherit",
     env: ctx.env,
@@ -448,11 +607,41 @@ export function trace(ctx, args) {
   });
 }
 
+/** 定位 agent-trace：显式参数 > 环境变量 > 仓库相对路径 > 当前目录。 */
+function resolveTraceScript(ctx, args) {
+  const explicit = args.flags.script ?? ctx.env.VC_AGENT_TRACE;
+  if (explicit !== undefined) {
+    if (explicit === true || typeof explicit !== "string")
+      throw new APIError(-1, "--script 需要 agent-trace.mjs 的路径", 2);
+    const target = path.resolve(explicit);
+    if (!fs.existsSync(target)) throw new APIError(-1, `找不到 agent-trace：${target}`, 2);
+    return target;
+  }
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const candidates = [
+    path.resolve(here, "../../scripts/agent-trace/agent-trace.mjs"),
+    path.resolve(process.cwd(), "scripts/agent-trace/agent-trace.mjs"),
+  ];
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) return candidate;
+  }
+  throw new APIError(
+    -1,
+    [
+      "找不到 agent-trace：独立安装包不包含运行记录脚本。",
+      "请用 `vc trace ... --script <仓库>/scripts/agent-trace/agent-trace.mjs`，",
+      "或设置环境变量 VC_AGENT_TRACE 指向该文件，也可以 cd 到仓库根再执行。",
+      `（已尝试：${candidates.join("、")}）`,
+    ].join("\n"),
+    2,
+  );
+}
+
 function flagsToArgv(flags) {
   const out = [];
   for (const [key, value] of Object.entries(flags)) {
-    // --json / --base 是本 CLI 的全局选项，agent-trace 不认，不能透传
-    if (key === "help" || key === "json" || key === "base") continue;
+    // --json / --base / --script 是本 CLI 的选项，agent-trace 不认，不能透传
+    if (key === "help" || key === "json" || key === "base" || key === "script") continue;
     if (value === true) out.push(`--${key}`);
     else out.push(`--${key}`, String(value));
   }

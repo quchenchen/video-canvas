@@ -40,15 +40,16 @@ const USAGE = `video-canvas-cli（beta）— 连镜命令行
   canvas get <code>
   canvas create --title <标题> [--payload 文件]
   canvas import <导出文件.json>
-  canvas export <code> [-o 文件]
+  canvas export <code> [-o 文件]        -o 与 --output 等价；- 表示输出到 stdout
   canvas graph <code> [-o 文件]
   canvas save <code> --payload 文件 [--revision N]
+                                        要 canvas graph 的输出，不是 canvas export 的导出文档
 
 生成任务
   task get <id|task_ref>
   task wait <id|task_ref> [--timeout 600] [--interval 3]
 
-运行记录（转发 scripts/agent-trace）
+运行记录（转发 scripts/agent-trace；独立安装包用 --script 或 VC_AGENT_TRACE 指定）
   trace pull [--since 7d] [--feedback down] ...
   trace show <run_id>
   trace compare --by harness_key [--since 30d]
@@ -61,10 +62,11 @@ const USAGE = `video-canvas-cli（beta）— 连镜命令行
 版本
   version         打印 CLI 版本（与站点版本独立）；加 --json 输出机器可读信息
 
-退出码：0 成功，1 业务或网络错误，2 用法错误
+退出码：0 成功，1 业务或网络错误（含任务失败），2 用法错误，3 task wait 等待超时
 
 当前是 beta 渠道：命令与参数尽量稳定，但输出格式和提示语仍可能调整。
-升级提示写在 stderr；非交互终端与 --json 场景不会打扰脚本。`;
+升级提示写在 stderr；非交互终端与 --json 场景不会打扰脚本。
+login 的授权地址始终写在 stderr，--json 时也一样——stdout 只留最后一行 JSON。`;
 
 /** 画布子命令。 */
 async function runCanvas(ctx, positional, flags) {
@@ -108,18 +110,22 @@ function buildContext(flags) {
   const env = process.env;
   const creds = loadCredentials(env);
   let base = null;
+  let baseError = null;
   try {
     if (flags.base || env.VC_API_BASE || creds?.base) {
       base = normalizeBase(flags.base || env.VC_API_BASE || creds?.base);
     }
-  } catch {
-    base = null;
+  } catch (err) {
+    // 不要吞掉原因：--base 少了 http:// 时要让用户看到「必须以 http:// 开头」，
+    // 而不是后面拼出 `null/canvas` 报一句「无法连接 null」。
+    baseError = err;
   }
   return {
     env,
     creds,
     credsPath: credentialsPath(env),
     base,
+    baseError,
     token: creds?.token,
     json: flags.json === true || flags.json === "true",
     stdout: (line) => process.stdout.write(`${line}\n`),
@@ -245,7 +251,9 @@ function startUpdateCheck(ctx, argv) {
           ? `irm ${site}/api/v1/cli/install.ps1 | iex`
           : `curl -fsSL ${site}/api/v1/cli/install.sh | sh`;
       ctx.stderr("");
-      ctx.stderr(`提示：命令行有新版本 ${latest}（当前 ${local}，${CLI_CHANNEL} 渠道）。升级：${how}`);
+      ctx.stderr(
+        `提示：命令行有新版本 ${latest}（当前 ${local}，${CLI_CHANNEL} 渠道）。升级：${how}`,
+      );
       ctx.stderr("  不想每次都查：VC_NO_UPDATE_CHECK=1");
     },
   };
@@ -267,7 +275,7 @@ function cliVersion() {
   }
 }
 
-const wantsJson = process.argv.slice(2).includes("--json");
+const wantsJson = process.argv.slice(2).some((arg) => arg === "--json" || arg === "--json=true");
 
 main(process.argv.slice(2)).catch((err) => {
   if (err instanceof APIError) {
@@ -278,7 +286,8 @@ main(process.argv.slice(2)).catch((err) => {
     } else {
       process.stderr.write(`错误：${err.message}\n`);
     }
-    process.exitCode = err.status === 2 ? 2 : 1;
+    // exitCode 优先：task wait 超时用 3，与「任务失败」的 1 区分开
+    process.exitCode = err.exitCode ?? (err.status === 2 ? 2 : 1);
     return;
   }
   if (wantsJson) {

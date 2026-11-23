@@ -1,10 +1,11 @@
-/** 业务错误：code 是后端信封里的 code，status 是 HTTP 状态码。 */
+/** 业务错误：code 是后端信封里的 code，status 是 HTTP 状态码，exitCode 可覆盖进程退出码。 */
 export class APIError extends Error {
-  constructor(code, message, status) {
+  constructor(code, message, status, exitCode) {
     super(message);
     this.name = "APIError";
     this.code = code;
     this.status = status;
+    this.exitCode = exitCode;
   }
 }
 
@@ -16,9 +17,10 @@ export function normalizeBase(raw) {
   const trimmed = String(raw || "")
     .trim()
     .replace(/\/+$/, "");
-  if (!trimmed) throw new APIError(-1, "缺少 API 地址，请用 --base 或环境变量 VC_API_BASE 指定", 0);
+  // 地址写错属于用法错误（退出码 2），不是业务错误，脚本不该重试
+  if (!trimmed) throw new APIError(-1, "缺少 API 地址，请用 --base 或环境变量 VC_API_BASE 指定", 2);
   if (!/^https?:\/\//i.test(trimmed))
-    throw new APIError(-1, `API 地址必须以 http:// 或 https:// 开头：${trimmed}`, 0);
+    throw new APIError(-1, `API 地址必须以 http:// 或 https:// 开头：${trimmed}`, 2);
   return /\/api\/v1$/i.test(trimmed) ? trimmed : `${trimmed}/api/v1`;
 }
 

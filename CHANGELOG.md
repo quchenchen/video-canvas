@@ -8,6 +8,15 @@
 
 - 新增命令行工具 `video-canvas-cli`（命令名 `video-canvas-cli` / `vc`）：用设备码在浏览器里确认一次即可登录，不必把密码或长期令牌交给脚本。支持画布列表 / 详情 / 新建 / 导入导出 / 整图保存、生成任务查询与等待、运行记录导出（转发 `scripts/agent-trace`）；`--json` 输出一行结构化结果，供脚本与 Agent 解析。登录接口为 `POST /auth/cli/device` 与 `POST /auth/cli/token`，授权页在 `/cli/authorize`，签发的仍是同一套 JWT（含 `token_version`），改密码后 CLI 令牌同样失效。命令行有自己的一页（`/cli`，后台在「AI 配置 → 命令行（CLI）」）；页头的「查看 CLI 文档」进完整参考（`/cli/docs`，正文是 `web/src/content/cli-docs.md`）。页面上的登录地址按当前站点实际使用的 `VITE_API_BASE_URL` 实时推导，写死域名、API 分域或带前缀都能自动跟着变。
 
+### 修复
+
+- 命令行 `-o` 短参数之前只有文档承诺、代码不认：`canvas export -o 文件` 会静默写到当前目录的 `canvas-<编号>.json`，`canvas graph -o` 直接把 JSON 打到屏幕。现在 `-o` 与 `--output` 等价，`-o -` 输出到 stdout；`--output -` 也不会再生成一个名为 `-` 的文件。
+- 命令行 `login --json` 之前拿不到授权地址——提示被关在非 JSON 分支里，脚本只能干等到超时。现在授权地址与用户码始终写 stderr，stdout 仍只留最后一行 JSON。
+- 命令行 `task wait` 的成败语义之前自相矛盾：等到失败终态时 `--json` 仍输出 `ok:true`，退出码却是 1。现在失败终态输出 `ok:false` 并带 `data`，新增退出码 3 专门表示「等待超时、任务仍在跑」，不再与任务失败混为一谈。
+- 命令行的数值参数（`--timeout` / `--interval` / `--page-size` / `--revision`）之前写错会静默退回默认值，`--page-size -1` 还会被解析成布尔开关。现在非法值直接报用法错误并给出允许范围。
+- 命令行 `--base` 只写域名（少了 `http://`）之前报「无法连接 null」，现在直接提示「API 地址必须以 http:// 或 https:// 开头」，并归为用法错误（退出码 2）。
+- 命令行 `canvas save` 之前会把 `canvas export` 的整份导出文档当画布内容写进去，结构会坏。现在识别出导出文档就拒绝，并提示改用 `canvas import`；`trace` 在独立安装包里也不再只会说「请在仓库内运行」，支持 `--script` 与 `VC_AGENT_TRACE` 指定脚本。
+
 ## [0.7.2] - 2026-11-22
 
 ### 新增
