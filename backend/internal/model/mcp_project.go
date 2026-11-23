@@ -225,9 +225,12 @@ type MCPProjectReq struct {
 	OwnerUserID string `json:"owner_user_id" binding:"omitempty,max=32" label:"归属用户"`
 	// CanvasCode 是**可选的默认画布**，收画布地址里那串 32 位十六进制。
 	// 留空表示不设默认：调用方每次都得自己指定 canvas（多画布场景本来就要指定）。
-	CanvasCode string   `json:"canvas_code" binding:"omitempty,max=32" label:"默认画布"`
-	Scopes     []string `json:"scopes" binding:"omitempty,max=8,dive,max=32" label:"权限"`
-	Enabled    *bool    `json:"enabled" binding:"omitempty" label:"启用"`
+	CanvasCode string `json:"canvas_code" binding:"omitempty,max=32" label:"默认画布"`
+	// Scopes 是勾选的权限档位。这里只防滥发（数组 ≤32 项、每个值 ≤32 字符），**不写死档位数量**：
+	// 合法值由 service 的 MCPScopeKnown 判，未知档位直接拒。数量上限一旦写成档位总数，
+	// 每加一档就会让「全选」被 422 拦住，而且提示只报「最多 N 项」，看不出是常量落后于档位表。
+	Scopes  []string `json:"scopes" binding:"omitempty,max=32,dive,max=32" label:"权限"`
+	Enabled *bool    `json:"enabled" binding:"omitempty" label:"启用"`
 }
 
 // MCPTokenIssueReq 是签发令牌的请求体：有效期 1–90 天，不允许永久令牌。
