@@ -46,6 +46,10 @@ type Server struct {
 	IDKey string `mapstructure:"id_key"`
 	// AllowedOrigins 是 WebSocket 升级时允许的 Origin 白名单（与 CORS 保持一致）；为空表示只允许同源。
 	AllowedOrigins []string `mapstructure:"allowed_origins"`
+	// PublicURL 是站点对外的根地址（如 https://example.com）。安装脚本、下载链接这类会被用户
+	// 复制走的地址必须用它：TLS 常常终止在反向代理或隧道那一层，后端拿到的 X-Forwarded-Proto
+	// 可能是空的，只靠请求头只能拼出 http://。为空时退回按请求头推导。
+	PublicURL string `mapstructure:"public_url"`
 }
 
 func (s Server) Addr() string {
