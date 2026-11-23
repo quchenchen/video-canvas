@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -18,6 +19,13 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
  * 这样 `trace` 透传给 agent-trace 的参数不会被 CLI 吞掉。
  */
 const SHORT_FLAGS = { o: "output" };
+
+/**
+ * 可以给多次的 flag：保留成列表，而不是后一个覆盖前一个。
+ * 只登记「本来就是多值」的几个（生成参数、参考素材、成片素材、镜号），
+ * 其余 flag 仍是「后出现者生效」——单值字段给两次是笔误，不该悄悄变成数组。
+ */
+const MULTI_FLAGS = new Set(["param", "ref-image", "ref-video", "ref-audio", "assets", "seqs"]);
 
 /**
  * 下一个 token 是不是「另一个选项」而不是值。
@@ -61,6 +69,16 @@ export function intFlag(flags, name, fallback, options) {
 export function parseArgs(argv) {
   const positional = [];
   const flags = {};
+  const setFlag = (name, value) => {
+    if (!MULTI_FLAGS.has(name)) {
+      flags[name] = value;
+      return;
+    }
+    const prev = flags[name];
+    if (prev === undefined) flags[name] = [value];
+    else if (Array.isArray(prev)) prev.push(value);
+    else flags[name] = [prev, value];
+  };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === "-h" || arg === "--help") {
@@ -70,15 +88,15 @@ export function parseArgs(argv) {
     if (arg.startsWith("--")) {
       const eq = arg.indexOf("=");
       if (eq > -1) {
-        flags[arg.slice(2, eq)] = arg.slice(eq + 1);
+        setFlag(arg.slice(2, eq), arg.slice(eq + 1));
         continue;
       }
       const name = arg.slice(2);
       const next = argv[i + 1];
       if (next === undefined || isOptionToken(next)) {
-        flags[name] = true;
+        setFlag(name, true);
       } else {
-        flags[name] = next;
+        setFlag(name, next);
         i++;
       }
       continue;
@@ -820,6 +838,754 @@ export async function taskWait(ctx, args) {
 }
 
 // ---------------------------------------------------------------------------
+// 模型与积分：提交生成之前先看清「有哪些模型」「要多少积分」
+// ---------------------------------------------------------------------------
+
+/** 取一个可重复 flag 的值：支持给多次，也支持一次给逗号分隔。 */
+function listFlag(flags, name) {
+  const raw = flags[name];
+  if (raw === undefined) return [];
+  const values = Array.isArray(raw) ? raw : [raw];
+  const out = [];
+  for (const value of values) {
+    if (value === true || typeof value !== "string")
+      throw new APIError(-1, `--${name} 需要值，例如 --${name} 1024`, 2);
+    for (const part of value.split(",")) {
+      const trimmed = part.trim();
+      if (trimmed) out.push(trimmed);
+    }
+  }
+  return out;
+}
+
+function formatModelRows(list) {
+  if (!list.length) return "（没有可用模型）";
+  const lines = ["KEY\tKIND\tLABEL\tHINT"];
+  for (const item of list) {
+    lines.push(`${item.key}\t${item.kind}\t${item.label || ""}\t${item.hint || ""}`);
+  }
+  return lines.join("\n");
+}
+
+/** 可用的模型清单（已上架、渠道与插件都就绪的）。 */
+export async function modelList(ctx, args) {
+  const token = requireToken(ctx);
+  const kind = args.flags.kind;
+  if (kind !== undefined && (kind === true || typeof kind !== "string"))
+    throw new APIError(-1, "用法：model list [--kind image|video|audio|text]", 2);
+  const models =
+    (await request({
+      base: baseOf(ctx),
+      token,
+      path: "/models",
+      query: { kind },
+      fetchImpl: ctx.fetchImpl,
+    })) || [];
+  emit(ctx, models, formatModelRows(models));
+}
+
+/**
+ * 单个模型的细节：生成方式、参数（--param 能填什么）、参考素材上限、计价。
+ * 这些正是提交生成时最容易猜错的部分，所以单独一条命令，而不是让用户翻后台。
+ */
+export async function modelShow(ctx, args) {
+  const key = args.positional[0];
+  if (!key) throw new APIError(-1, "用法：model show <模型 key>", 2);
+  const token = requireToken(ctx);
+  const models =
+    (await request({ base: baseOf(ctx), token, path: "/models", fetchImpl: ctx.fetchImpl })) || [];
+  const model = models.find((item) => item.key === key);
+  if (!model) {
+    const near = models
+      .filter((item) => String(item.key).includes(key) || String(item.label || "").includes(key))
+      .map((item) => item.key);
+    throw new APIError(
+      -1,
+      `找不到模型 ${key}${near.length ? `；相近的有：${near.join("、")}` : ""}。用 model list 看全部`,
+      0,
+    );
+  }
+  const caps = model.capabilities || {};
+  const lines = [
+    `${model.label || model.key}（${model.key}）`,
+    `种类：${model.kind}${model.vendor ? `  厂商：${model.vendor}` : ""}`,
+    `生成方式：${(caps.ops || []).join(" / ") || "-"}`,
+  ];
+  // capabilities.params 在接口里是「名字 -> 字段」的对象（键序就是画布参数面板的顺序），不是数组
+  const params =
+    caps.params && typeof caps.params === "object" ? Object.entries(caps.params) : [];
+  for (const [name, field] of params) {
+    const range =
+      field.type === "enum"
+        ? `可选 ${(field.options || []).join(" / ")}`
+        : field.type === "number"
+          ? `${field.min ?? "-"}–${field.max ?? "-"}${field.unit ? ` ${field.unit}` : ""}`
+          : "布尔";
+    const fallback = field.open === false ? "，画布上不显示、按默认发送" : "";
+    lines.push(
+      `参数 ${name}：${field.label || name}（${range}${field.default !== undefined ? `，默认 ${JSON.stringify(field.default)}` : ""}${fallback}）`,
+    );
+  }
+  if (caps.prompt?.max) lines.push(`提示词上限：${caps.prompt.max} 字`);
+  for (const [type, spec] of Object.entries(caps.refs || {})) {
+    if (!spec?.on) continue;
+    lines.push(
+      `参考素材：${type} 最多 ${spec.max ?? "-"} 个${spec.max_mb ? `，单个不超过 ${spec.max_mb} MB` : ""}`,
+    );
+  }
+  if (model.pricing) lines.push(`计价：${JSON.stringify(model.pricing)}`);
+  emit(ctx, model, lines.join("\n"));
+}
+
+/** 当前积分：余额、冻结中、可用。 */
+export async function credits(ctx) {
+  const token = requireToken(ctx);
+  const data = await request({
+    base: baseOf(ctx),
+    token,
+    path: "/credits",
+    fetchImpl: ctx.fetchImpl,
+  });
+  emit(ctx, data, `积分：余额 ${data.balance}  冻结 ${data.frozen}  可用 ${data.available}`);
+}
+
+// ---------------------------------------------------------------------------
+// 生成：提交 /generation-tasks
+// ---------------------------------------------------------------------------
+
+const GENERATE_KINDS = new Set(["image", "video", "audio", "text"]);
+
+/** 读 --input：JSON 字符串、@文件 或 -（标准输入）。只接受对象。 */
+function readInputJSON(flags, usage) {
+  const raw = flags.input;
+  if (raw === undefined) return {};
+  if (raw === true || typeof raw !== "string")
+    throw new APIError(-1, `--input 需要 JSON 字符串、@文件 或 -；用法：${usage}`, 2);
+  let text;
+  if (raw === "-") {
+    try {
+      text = fs.readFileSync(0, "utf8");
+    } catch (err) {
+      throw new APIError(-1, `读取标准输入失败：${err.message}`, 2);
+    }
+  } else if (raw.startsWith("@")) {
+    return readJSONFile(raw.slice(1));
+  } else {
+    text = raw;
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(text);
+  } catch (err) {
+    throw new APIError(-1, `--input 不是合法 JSON：${err.message}`, 2);
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
+    throw new APIError(-1, '--input 需要 JSON 对象，例如 \'{"prompt":"海边日出"}\'', 2);
+  return parsed;
+}
+
+/** 把 --input / --prompt / --param / --ref-* 合成接口要的 input 对象。 */
+function buildGenerateInput(flags, usage) {
+  const input = { ...readInputJSON(flags, usage) };
+  if (flags.prompt !== undefined) input.prompt = stringFlag(flags, "prompt", usage);
+  for (const pair of listFlag(flags, "param")) {
+    const eq = pair.indexOf("=");
+    if (eq < 1) throw new APIError(-1, `--param 要写成 名=值，收到「${pair}」`, 2);
+    const name = pair.slice(0, eq).trim();
+    const raw = pair.slice(eq + 1);
+    let value = raw;
+    // 数字、布尔、数组按 JSON 解释，其余按字符串：CLI 上 `--param duration=5` 最自然
+    try {
+      value = JSON.parse(raw);
+    } catch {
+      value = raw;
+    }
+    input[name] = value;
+  }
+  for (const [key, name] of [
+    ["ref-image", "images"],
+    ["ref-video", "videos"],
+    ["ref-audio", "audios"],
+  ]) {
+    const ids = listFlag(flags, key);
+    if (!ids.length) continue;
+    input[name] = ids.map((id) => {
+      if (!/^\d+$/.test(id))
+        throw new APIError(-1, `--${key} 要素材 id（纯数字），收到「${id}」`, 2);
+      return id;
+    });
+  }
+  return input;
+}
+
+/** 提交后等任务到终态；超时抛退出码 3，与 task wait 一致。 */
+async function waitTaskTerminal(ctx, id, { timeoutSeconds, intervalSeconds }) {
+  const deadline = Date.now() + timeoutSeconds * 1000;
+  let last = "";
+  while (Date.now() < deadline) {
+    const task = await fetchTask(ctx, id);
+    if (task.status !== last) {
+      const progress =
+        task.progress === null || task.progress === undefined ? "" : ` ${task.progress}%`;
+      ctx.stderr(`[${new Date().toISOString().slice(11, 19)}] ${id} ${task.status}${progress}`);
+      last = task.status;
+    }
+    if (TERMINAL_TASK_STATUSES.has(task.status)) return task;
+    await sleep(intervalSeconds * 1000);
+  }
+  throw new APIError(
+    -1,
+    `等待超时（${timeoutSeconds}s），任务 ${id} 仍未结束；可用 task get ${id} 继续查`,
+    0,
+    3,
+  );
+}
+
+function formatSubmittedItems(items) {
+  const lines = [];
+  for (const item of items) {
+    if (item.task) {
+      lines.push(
+        `+ 节点 ${item.node_id || "-"}：任务 ${item.task.task_ref || item.task.id}（${item.task.status}，冻结 ${item.task.credits} 积分）`,
+      );
+    } else if (item.error) {
+      lines.push(`! 节点 ${item.node_id || "-"}：失败 ${item.error.status} ${item.error.message}`);
+    }
+  }
+  return lines.length ? lines.join("\n") : "（没有提交任何任务）";
+}
+
+/**
+ * 提交一次生成。产物回填由画布负责：任务已经绑在节点上，打开画布时按节点拉取生成记录并落到节点，
+ * 与在网页上点生成是同一条链路——CLI 不自己改节点，也就不会和画布里的编辑抢版本。
+ */
+export async function generate(ctx, args) {
+  const kind = args.positional[0];
+  const usage =
+    "generate <image|video|audio|text> --model <模型key> " +
+    "[--canvas <画布编号> --node <节点id>] [--prompt <提示词>] [--param 名=值]... " +
+    "[--input '<json>'|@文件|-] [--ref-image <素材id>]... [--count 1] [--wait] [--timeout 600] [--interval 3]";
+  if (!kind || !GENERATE_KINDS.has(kind))
+    throw new APIError(
+      -1,
+      `第一项要写生成种类（${[...GENERATE_KINDS].join(" / ")}）。用法：${usage}`,
+      2,
+    );
+  const model = stringFlag(args.flags, "model", usage);
+  const canvas = args.flags.canvas;
+  const node = args.flags.node;
+  for (const [name, value] of [
+    ["canvas", canvas],
+    ["node", node],
+  ]) {
+    if (value !== undefined && (value === true || typeof value !== "string"))
+      throw new APIError(-1, `--${name} 需要字符串值。用法：${usage}`, 2);
+  }
+  // 绑节点才会在画布里留下这次生成；只给一个的话另一个就没意义了
+  if ((canvas === undefined) !== (node === undefined))
+    throw new APIError(-1, "--canvas 与 --node 要一起给（都省略就是一条不挂画布的临时任务）", 2);
+
+  const input = buildGenerateInput(args.flags, usage);
+  if (!Object.keys(input).length)
+    throw new APIError(-1, "至少要给一个生成参数：--prompt、--param 或 --input", 2);
+
+  const count = intFlag(args.flags, "count", 1, { max: 8 });
+  if (count > 1 && node === undefined)
+    throw new APIError(-1, "--count 大于 1 时必须给 --node：多个任务要绑在同一个节点上", 2);
+
+  const body = { kind, model_id: model, input };
+  if (canvas !== undefined) body.canvas_id = canvas;
+  if (node !== undefined) {
+    body.node_id = node;
+    body.node_ids = Array.from({ length: count }, () => node);
+  }
+
+  const token = requireToken(ctx);
+  const idempotencyKey =
+    typeof args.flags["idempotency-key"] === "string"
+      ? args.flags["idempotency-key"]
+      : randomUUID();
+  const res = await request({
+    base: baseOf(ctx),
+    token,
+    method: "POST",
+    path: "/generation-tasks",
+    body,
+    headers: { "Idempotency-Key": idempotencyKey },
+    fetchImpl: ctx.fetchImpl,
+  });
+  const items = Array.isArray(res?.items) ? res.items : [];
+  const tasks = items.map((item) => item.task).filter(Boolean);
+  const failures = items.filter((item) => item.error);
+  if (!tasks.length) {
+    const first = failures[0]?.error;
+    throw new APIError(
+      first?.code ?? -1,
+      `提交失败：${first ? `${first.status} ${first.message}` : "服务端没有返回任务"}`,
+      0,
+    );
+  }
+
+  if (args.flags.wait === undefined) {
+    emit(
+      ctx,
+      { items, tasks },
+      [
+        formatSubmittedItems(items),
+        "",
+        "任务已提交，产物会在打开画布时回填到节点；要在这里等，加 --wait。",
+      ].join("\n"),
+    );
+    return;
+  }
+
+  const timeoutSeconds = intFlag(args.flags, "timeout", 600, { max: 86400 });
+  const intervalSeconds = intFlag(args.flags, "interval", 3, { max: 3600 });
+  const settled = [];
+  for (const task of tasks) {
+    settled.push(await waitTaskTerminal(ctx, task.id, { timeoutSeconds, intervalSeconds }));
+  }
+  const failed = settled.filter((task) => task.status !== "succeeded");
+  const human = [formatSubmittedItems(items), "", ...settled.map((task) => formatTask(task))].join(
+    "\n",
+  );
+  if (!failed.length) {
+    emit(ctx, { items, tasks: settled }, human);
+    return;
+  }
+  if (ctx.json) {
+    ctx.stdout(
+      JSON.stringify({
+        ok: false,
+        error: {
+          code: failed[0].error_code ?? -1,
+          message: failed[0].error_message || `任务${failed[0].status}`,
+        },
+        data: { items, tasks: settled },
+      }),
+    );
+  } else {
+    ctx.stdout(human);
+  }
+  process.exitCode = 1;
+}
+
+// ---------------------------------------------------------------------------
+// 合成成片
+// ---------------------------------------------------------------------------
+
+const TERMINAL_COMPOSE_STATUSES = new Set(["succeeded", "failed", "canceled"]);
+
+/** 节点当前生效的素材 id：优先 activeOutputId 指向的那一版，老节点只有 assetId。 */
+function activeAssetIdOf(data) {
+  const activeId = data?.activeOutputId;
+  const outputs = Array.isArray(data?.outputs) ? data.outputs : [];
+  if (activeId !== undefined && activeId !== null) {
+    const hit = outputs.find((one) => String(one.id) === String(activeId));
+    if (hit?.assetId) return String(hit.assetId);
+  }
+  return data?.assetId ? String(data.assetId) : "";
+}
+
+/**
+ * 按成片节点的上游推导素材顺序，规则与画布一致：
+ * 先认 data.composeOrder（用户手动调过的段序），其余按画布位置（先上下、再左右）。
+ * 只收视频节点；还没出视频的段跳过，并在返回值里报出来。
+ */
+function deriveComposeAssets(graph, nodeId) {
+  const nodes = graph.nodes || [];
+  const composeNode = nodes.find((item) => item.id === nodeId);
+  if (!composeNode) throw new APIError(-1, `画布里找不到节点 ${nodeId}`, 0);
+  if (composeNode.data?.kind !== "compose")
+    throw new APIError(
+      -1,
+      `节点 ${nodeId} 不是成片节点（data.kind=${composeNode.data?.kind || "-"}）`,
+      2,
+    );
+  const order = Array.isArray(composeNode.data.composeOrder) ? composeNode.data.composeOrder : [];
+  const rank = new Map(order.map((id, index) => [id, index]));
+  const sources = (graph.edges || [])
+    .filter((edge) => edge.target === nodeId)
+    .map((edge) => nodes.find((item) => item.id === edge.source))
+    .filter((item) => item && item.data?.kind === "video");
+  const positionOf = (item) => ({
+    x: Number(item.position?.x ?? 0),
+    y: Number(item.position?.y ?? 0),
+  });
+  const sorted = [...sources].sort((a, b) => {
+    const ra = rank.get(a.id);
+    const rb = rank.get(b.id);
+    if (ra === undefined && rb === undefined) {
+      const pa = positionOf(a);
+      const pb = positionOf(b);
+      return pa.y - pb.y || pa.x - pb.x || String(a.id).localeCompare(String(b.id));
+    }
+    if (ra === undefined) return 1;
+    if (rb === undefined) return -1;
+    return ra - rb;
+  });
+  const rows = [];
+  const missing = [];
+  sorted.forEach((item, seq) => {
+    const assetId = activeAssetIdOf(item.data);
+    if (!assetId) {
+      missing.push(seq);
+      rows.push({ seq, node: item.id, label: item.data?.label || "视频", assetId: "" });
+      return;
+    }
+    rows.push({ seq, node: item.id, label: item.data?.label || "视频", assetId });
+  });
+  return { rows, missing };
+}
+
+function formatComposeRows(rows) {
+  if (!rows.length) return "（成片节点上没有连进来的视频）";
+  const lines = ["SEQ\tASSET\tNODE\tLABEL"];
+  for (const row of rows) {
+    lines.push(`${row.seq}\t${row.assetId || "（还没有视频）"}\t${row.node}\t${row.label}`);
+  }
+  return lines.join("\n");
+}
+
+function formatComposeJob(job) {
+  const lines = [`合成任务：${job.id}`, `状态：${job.status}`];
+  if (job.segment_count !== undefined) lines.push(`片段：${job.segment_count}`);
+  if (job.duration_ms) lines.push(`时长：${(job.duration_ms / 1000).toFixed(1)} 秒`);
+  if (job.result_asset_id) lines.push(`成片素材：${job.result_asset_id}`);
+  if (job.result_asset_url) lines.push(`成片地址：${job.result_asset_url}`);
+  if (job.error) lines.push(`错误：${job.error}`);
+  return lines.join("\n");
+}
+
+/**
+ * 合成成片：POST /canvas/:id/compose，asset_ids 的顺序就是成片顺序。
+ * 不给 --assets 时按画布里的成片节点推导（composeOrder 优先），并把推导结果打出来，
+ * 用户能对着看是不是想要的顺序——顺序错了成片就错了，不能猜完不吭声。
+ */
+export async function canvasCompose(ctx, args) {
+  const code = args.positional[0];
+  const usage =
+    "canvas compose <画布编号> --node <成片节点id> [--assets 素材id,素材id...] [--seqs 1,2,3] " +
+    "[--mode storyboard|compose|selection] [--wait] [--timeout 900] [--interval 5]";
+  const node = args.flags.node;
+  if (!code || node === undefined) throw new APIError(-1, `用法：${usage}`, 2);
+  if (node === true || typeof node !== "string")
+    throw new APIError(-1, `--node 需要成片节点 id。用法：${usage}`, 2);
+
+  let rows = [];
+  let assetIds = listFlag(args.flags, "assets");
+  let derived = false;
+  if (!assetIds.length) {
+    const canvas = await fetchCanvas(ctx, code);
+    const graph = canvas.payload_json || {};
+    const result = deriveComposeAssets(graph, node);
+    rows = result.rows;
+    assetIds = result.rows.map((row) => row.assetId).filter(Boolean);
+    derived = true;
+    if (!assetIds.length)
+      throw new APIError(
+        -1,
+        `${formatComposeRows(rows)}\n成片节点 ${node} 的上游还没有可用的视频素材；` +
+          "先在画布里生成视频，或用 --assets 显式给素材 id",
+        0,
+      );
+  }
+
+  const body = { node_id: node, asset_ids: assetIds };
+  const seqs = listFlag(args.flags, "seqs").map((raw) => toInt(raw, "seqs", { min: 0 }));
+  if (seqs.length) body.seqs = seqs;
+  if (typeof args.flags.mode === "string") body.mode = args.flags.mode;
+
+  const token = requireToken(ctx);
+  const job = await request({
+    base: baseOf(ctx),
+    token,
+    method: "POST",
+    path: `/canvas/${encodeURIComponent(code)}/compose`,
+    body,
+    fetchImpl: ctx.fetchImpl,
+  });
+  const plan = derived ? formatComposeRows(rows) : `素材顺序：${assetIds.join(" → ")}`;
+
+  if (args.flags.wait === undefined) {
+    emit(
+      ctx,
+      { job, assets: assetIds, rows },
+      [plan, "", formatComposeJob(job), "", "已提交，加 --wait 可以等它合成完。"].join("\n"),
+    );
+    return;
+  }
+
+  const timeoutSeconds = intFlag(args.flags, "timeout", 900, { max: 86400 });
+  const intervalSeconds = intFlag(args.flags, "interval", 5, { max: 3600 });
+  const deadline = Date.now() + timeoutSeconds * 1000;
+  let last = "";
+  let final = job;
+  while (Date.now() < deadline) {
+    final = await request({
+      base: baseOf(ctx),
+      token,
+      path: `/canvas/${encodeURIComponent(code)}/compose/${encodeURIComponent(job.id)}`,
+      fetchImpl: ctx.fetchImpl,
+    });
+    if (final.status !== last) {
+      ctx.stderr(`[${new Date().toISOString().slice(11, 19)}] ${final.status}`);
+      last = final.status;
+    }
+    if (TERMINAL_COMPOSE_STATUSES.has(final.status)) break;
+    await sleep(intervalSeconds * 1000);
+  }
+  if (!TERMINAL_COMPOSE_STATUSES.has(final.status))
+    throw new APIError(
+      -1,
+      `等待超时（${timeoutSeconds}s），合成任务 ${job.id} 仍未结束；可用 canvas compose-status 继续查`,
+      0,
+      3,
+    );
+
+  const human = [plan, "", formatComposeJob(final)].join("\n");
+  if (final.status === "succeeded") {
+    emit(ctx, { job: final, assets: assetIds, rows }, human);
+    return;
+  }
+  if (ctx.json) {
+    ctx.stdout(
+      JSON.stringify({
+        ok: false,
+        error: { code: -1, message: final.error || `合成${final.status}` },
+        data: { job: final, assets: assetIds, rows },
+      }),
+    );
+  } else {
+    ctx.stdout(human);
+  }
+  process.exitCode = 1;
+}
+
+/** 查合成任务：给 --job 就按任务 id 查，给 --node 就查该节点上最新的任务（含是否已过期）。 */
+export async function canvasComposeStatus(ctx, args) {
+  const code = args.positional[0];
+  const usage =
+    "canvas compose-status <画布编号> [--job <任务id> | --node <成片节点id> [--assets 素材id,...]]";
+  if (!code) throw new APIError(-1, `用法：${usage}`, 2);
+  const jobId = args.flags.job;
+  const node = args.flags.node;
+  if (jobId === undefined && node === undefined)
+    throw new APIError(-1, `要给 --job 或 --node 其中之一。用法：${usage}`, 2);
+  const token = requireToken(ctx);
+  if (jobId !== undefined) {
+    if (jobId === true || typeof jobId !== "string")
+      throw new APIError(-1, `--job 需要任务 id。用法：${usage}`, 2);
+    const job = await request({
+      base: baseOf(ctx),
+      token,
+      path: `/canvas/${encodeURIComponent(code)}/compose/${encodeURIComponent(jobId)}`,
+      fetchImpl: ctx.fetchImpl,
+    });
+    emit(ctx, job, formatComposeJob(job));
+    return;
+  }
+  if (node === true || typeof node !== "string")
+    throw new APIError(-1, `--node 需要成片节点 id。用法：${usage}`, 2);
+  const assets = listFlag(args.flags, "assets");
+  const res = await request({
+    base: baseOf(ctx),
+    token,
+    path: `/canvas/${encodeURIComponent(code)}/compose/active`,
+    query: { node_id: node, asset_ids: assets.join(",") },
+    fetchImpl: ctx.fetchImpl,
+  });
+  if (!res) {
+    emit(ctx, {}, "这个节点上没有进行中的合成任务");
+    return;
+  }
+  const stale = res.stale === undefined ? "" : res.stale ? "（素材已变，成片过期）" : "";
+  emit(ctx, res, `${formatComposeJob(res)}${stale}`);
+}
+
+/** 取消还没落终态的合成任务。 */
+export async function canvasComposeCancel(ctx, args) {
+  const code = args.positional[0];
+  const usage = "canvas compose-cancel <画布编号> --job <任务id>";
+  if (!code || args.flags.job === undefined) throw new APIError(-1, `用法：${usage}`, 2);
+  const jobId = stringFlag(args.flags, "job", usage);
+  const token = requireToken(ctx);
+  const job = await request({
+    base: baseOf(ctx),
+    token,
+    method: "POST",
+    path: `/canvas/${encodeURIComponent(code)}/compose/${encodeURIComponent(jobId)}/cancel`,
+    fetchImpl: ctx.fetchImpl,
+  });
+  emit(ctx, job, formatComposeJob(job));
+}
+
+// ---------------------------------------------------------------------------
+// 短剧：只读与任务控制
+// ---------------------------------------------------------------------------
+
+function formatDramaRows(list) {
+  if (!list.length) return "（没有短剧）";
+  const lines = ["CODE\tSTATUS\tPHASE\tEPISODES\tLOCKED\tUPDATED\tTITLE"];
+  for (const item of list) {
+    lines.push(
+      `${item.id}\t${item.status}\t${item.phase || "-"}\t${item.episode_count ?? 0}\t${item.locked_count ?? 0}\t${String(
+        item.updated_at || "",
+      )
+        .replace("T", " ")
+        .slice(0, 19)}\t${item.title}`,
+    );
+  }
+  return lines.join("\n");
+}
+
+function formatJobRows(list) {
+  if (!list.length) return "（没有任务）";
+  const lines = ["JOB\tSTEP\tSTATUS\tPROGRESS\tEPISODES\tLANE\tCREDITS"];
+  for (const job of list) {
+    lines.push(
+      `${job.id}\t${job.step}\t${job.status}\t${job.progress ?? 0}%\t${(job.episodes || []).join(",") || "-"}\t${job.lane || "-"}\t${job.credits ?? 0}`,
+    );
+  }
+  return lines.join("\n");
+}
+
+function formatDramaDetail(view) {
+  const lines = [
+    `${view.title}（${view.id}）`,
+    `状态：${view.status}  阶段：${view.phase || "-"}`,
+    `原文：${view.source_chars ?? 0} 字  单元：${view.units_total ?? 0} 个（${view.unit_kind || "-"}）`,
+    `目标：${view.target_episodes ?? 0} 集 × ${view.episode_seconds ?? 0} 秒  画幅：${view.ratio || "-"}`,
+    `画布：${view.canvas_id || "-"}`,
+  ];
+  if (view.pause_reason) lines.push(`暂停原因：${view.pause_reason}（${view.pause_code || "-"}）`);
+  const episodes = view.episodes || [];
+  if (episodes.length) {
+    lines.push("分集：");
+    for (const ep of episodes) {
+      lines.push(
+        `  第 ${ep.no} 集  ${ep.title || ""}  单元 ${ep.unit_from ?? "-"}–${ep.unit_to ?? "-"}  剧本 ${ep.script_status || "-"}`,
+      );
+    }
+  }
+  return lines.join("\n");
+}
+
+const pageOf = (res) =>
+  Array.isArray(res)
+    ? { list: res, total: res.length, page: 1, page_size: res.length }
+    : res || { list: [], total: 0 };
+
+export async function dramaList(ctx, args) {
+  const token = requireToken(ctx);
+  const page = pageOf(
+    await request({
+      base: baseOf(ctx),
+      token,
+      path: "/dramas",
+      query: {
+        keyword: typeof args.flags.keyword === "string" ? args.flags.keyword : undefined,
+        page: intFlag(args.flags, "page", undefined),
+        page_size: intFlag(args.flags, "page-size", undefined, { max: 200 }),
+      },
+      fetchImpl: ctx.fetchImpl,
+    }),
+  );
+  const list = page.list || [];
+  emit(
+    ctx,
+    { list, total: page.total, page: page.page, page_size: page.page_size },
+    `${formatDramaRows(list)}\n共 ${page.total} 部，第 ${page.page} 页`,
+  );
+}
+
+export async function dramaGet(ctx, args) {
+  const code = args.positional[0];
+  if (!code) throw new APIError(-1, "用法：drama get <短剧编号>", 2);
+  const token = requireToken(ctx);
+  const view = await request({
+    base: baseOf(ctx),
+    token,
+    path: `/dramas/${encodeURIComponent(code)}`,
+    fetchImpl: ctx.fetchImpl,
+  });
+  emit(ctx, view, formatDramaDetail(view));
+}
+
+export async function dramaUnits(ctx, args) {
+  const code = args.positional[0];
+  if (!code) throw new APIError(-1, "用法：drama units <短剧编号> [--from 1] [--to 20]", 2);
+  const token = requireToken(ctx);
+  const from = intFlag(args.flags, "from", undefined, { min: 1 });
+  const to = intFlag(args.flags, "to", undefined, { min: 1 });
+  const items =
+    (await request({
+      base: baseOf(ctx),
+      token,
+      path: `/dramas/${encodeURIComponent(code)}/units`,
+      query: { from, to },
+      fetchImpl: ctx.fetchImpl,
+    })) || [];
+  const lines = (items.length ? items : []).map(
+    (unit) => `${unit.no}\t${unit.title || ""}\t${unit.chars ?? (unit.text || "").length} 字`,
+  );
+  emit(ctx, items, items.length ? ["NO\tTITLE\tCHARS", ...lines].join("\n") : "（没有单元）");
+}
+
+export async function dramaUnit(ctx, args) {
+  const code = args.positional[0];
+  const no = args.positional[1];
+  if (!code || !no) throw new APIError(-1, "用法：drama unit <短剧编号> <单元号>", 2);
+  const token = requireToken(ctx);
+  const unit = await request({
+    base: baseOf(ctx),
+    token,
+    path: `/dramas/${encodeURIComponent(code)}/units/${encodeURIComponent(no)}`,
+    fetchImpl: ctx.fetchImpl,
+  });
+  emit(
+    ctx,
+    unit,
+    [
+      `第 ${unit.no} 单元  ${unit.title || ""}（${unit.status || "-"}）`,
+      "",
+      unit.text || "（正文为空）",
+    ].join("\n"),
+  );
+}
+
+export async function dramaJobs(ctx, args) {
+  const code = args.positional[0];
+  if (!code) throw new APIError(-1, "用法：drama jobs <短剧编号> [--active]", 2);
+  const token = requireToken(ctx);
+  const res = await request({
+    base: baseOf(ctx),
+    token,
+    path: `/dramas/${encodeURIComponent(code)}/jobs`,
+    query: args.flags.active === undefined ? undefined : { status: "active" },
+    fetchImpl: ctx.fetchImpl,
+  });
+  const items = (res && res.items) || [];
+  emit(ctx, { items }, formatJobRows(items));
+}
+
+export async function dramaJobCancel(ctx, args) {
+  const code = args.positional[0];
+  const usage = "drama job-cancel <短剧编号> --job <任务id>";
+  if (!code || args.flags.job === undefined) throw new APIError(-1, `用法：${usage}`, 2);
+  const jobId = stringFlag(args.flags, "job", usage);
+  const token = requireToken(ctx);
+  const job = await request({
+    base: baseOf(ctx),
+    token,
+    method: "POST",
+    path: `/dramas/${encodeURIComponent(code)}/jobs/${encodeURIComponent(jobId)}/cancel`,
+    fetchImpl: ctx.fetchImpl,
+  });
+  emit(ctx, job, formatJobRows([job]));
+}
+
+// ---------------------------------------------------------------------------
 // 运行记录（复用 scripts/agent-trace）
 // ---------------------------------------------------------------------------
 
@@ -897,6 +1663,19 @@ export const COMMANDS = {
   canvasNodeRm,
   canvasNodeSet,
   canvasSave,
+  canvasCompose,
+  canvasComposeStatus,
+  canvasComposeCancel,
+  modelList,
+  modelShow,
+  credits,
+  generate,
+  dramaList,
+  dramaGet,
+  dramaUnits,
+  dramaUnit,
+  dramaJobs,
+  dramaJobCancel,
   taskGet,
   taskWait,
   trace,

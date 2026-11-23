@@ -1,6 +1,7 @@
 # video-canvas-cli（beta）
 
-连镜（video-canvas）的命令行。用设备码登录，不用把密码或长期令牌交给脚本；画布与生成任务的读写都走已有的 HTTP 接口。
+连镜（video-canvas）的命令行。用设备码登录，不用把密码或长期令牌交给脚本；画布、模型与积分、生成任务、
+成片合成、短剧只读、运行记录都走已有的 HTTP 接口。
 
 **beta 渠道**：相当一段时间内保持测试状态，命令与参数尽量稳定，但输出格式与子命令仍可能调整。
 每次运行会在后台查一次新版本，有更新时在 stderr 提示升级命令（`VC_NO_UPDATE_CHECK=1` 可关掉）。
@@ -42,6 +43,9 @@ video-canvas-cli logout     # 删除本地凭据
 ```
 
 令牌与网页登录是同一套 JWT：改密码会让 CLI 令牌一起失效，服务端没有额外的吊销列表。
+有效期不同：命令行登录态**默认 30 天**（后台「注册设置 → 命令行登录有效期」可改，1–365 天），
+网页会话按 `jwt.expire_hours`。它与「设备码 10 分钟」「MCP 令牌天数」「MCP 单次调用超时」「--wait 本地等待」
+都是不同的数，别混。
 
 ## 画布
 
@@ -84,6 +88,52 @@ video-canvas-cli canvas node rm <code> <节点id>
 - **没有 `--yes` 之类的旁路，也不能和 `--json` 一起用**：脚本无法在无人确认时做节点级修改。
   要用脚本批量改，走 `canvas graph` + `canvas save`。
 
+## 模型、积分与生成
+
+```bash
+video-canvas-cli model list [--kind image|video|audio|text]
+video-canvas-cli model show agnes-video-2.5        # 参数名、可选值、参考素材上限、计价
+video-canvas-cli credits                           # 余额 / 冻结 / 可用
+
+video-canvas-cli generate image --model agnes-image-2.5-flash \
+  --prompt "一枚硬币躺在岩面上，侧光" --param aspect_ratio=16:9 \
+  --canvas <code> --node <节点id> --wait --timeout 300
+```
+
+- **产物由画布回填到节点**：CLI 只把任务绑在节点上，与网页点生成同一条链路；打开画布时按节点拉取生成记录。
+- `--canvas` 与 `--node` 要么都给、要么都不给（都不给是临时任务，产物只能从任务详情取地址）。
+- `--param 名=值` 可给多次，值先按 JSON 解释；复杂结构用 `--input '{...}'`（也支持 `@文件`、`-` 读标准输入）。
+- 参考素材用 `--ref-image / --ref-video / --ref-audio`，可给多次或逗号分隔。
+- `--count N` 拆成 N 个任务，都绑同一个节点（需要 `--node`）。
+- 普通提交是幂等的（自动带 `Idempotency-Key`），脚本重试要复用 `--idempotency-key`。
+
+## 合成成片
+
+```bash
+video-canvas-cli canvas compose <code> --node <成片节点id>            # 只提交
+video-canvas-cli canvas compose <code> --node <成片节点id> --wait     # 等到出片
+video-canvas-cli canvas compose <code> --node <成片节点id> --assets 923,920 --wait
+video-canvas-cli canvas compose-status <code> --job <任务id>
+video-canvas-cli canvas compose-status <code> --node <成片节点id>
+video-canvas-cli canvas compose-cancel <code> --job <任务id>
+```
+
+不给 `--assets` 时按与画布相同的规则推导：只收连进成片节点的视频节点，`composeOrder` 优先、其余按画布位置，
+每段取当前生效的那一版；推导结果会先打印出来再提交。
+
+## 短剧（只读 + 任务控制）
+
+```bash
+video-canvas-cli drama list [--keyword 关键词]
+video-canvas-cli drama get <短剧编号>
+video-canvas-cli drama units <短剧编号> [--from 1] [--to 20]
+video-canvas-cli drama unit <短剧编号> <单元号>
+video-canvas-cli drama jobs <短剧编号> [--active]
+video-canvas-cli drama job-cancel <短剧编号> --job <任务id>
+```
+
+建项目、规划、生成剧本、分集出片仍在网页与 MCP：它们要长上下文、要逐步核对、要花大额积分。
+
 ## 生成任务
 
 ```bash
@@ -115,12 +165,12 @@ video-canvas-cli trace compare --by harness_key --since 30d
 ## 输出与退出码
 
 - 默认人类可读；加 `--json` 输出 `{"ok":true,"data":...}`，失败输出 `{"ok":false,"error":{"code":...,"message":...}}`。
-- 退出码：`0` 成功，`1` 业务/网络错误或任务失败，`2` 用法错误，`3` `task wait` 等待超时，
-  `4` 节点级修改被取消。
+- 退出码：`0` 成功，`1` 业务/网络错误或任务失败，`2` 用法错误，`3` `--wait` / `task wait` 等待超时
+  （任务仍在跑，不是失败），`4` 节点级修改被取消。
 
 ## 权限边界
 
 CLI 用的令牌等同网页登录的权限：能访问该用户自己的画布、素材、生成任务与积分。管理员命令（渠道、模型、用户管理）没有封装进这一版，避免一个脚本令牌顺手改掉平台配置。
 
-**这一版不生产素材**：没有生成图片/视频、没有合成成片、没有删除画布。生成与合成走画布界面或平台接口，
-CLI 只负责画布读写与盯着任务跑完。细节见站点 `/cli/docs` 的「边界与限制」。
+**不改节点产物字段**：生成与合成的产物由服务端与画布写回节点，CLI 不去改 `src` / `assetId` / `outputs`，
+免得绕过画布的版本归并。**不删画布**，**不做短剧重活**。细节见站点 `/cli/docs` 的「边界与限制」。

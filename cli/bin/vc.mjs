@@ -8,6 +8,9 @@ import { fileURLToPath } from "node:url";
 
 import { APIError, normalizeBase, siteRootOf } from "../src/client.mjs";
 import {
+  canvasCompose,
+  canvasComposeCancel,
+  canvasComposeStatus,
   canvasCreate,
   canvasExport,
   canvasGet,
@@ -18,8 +21,18 @@ import {
   canvasNodeRm,
   canvasNodeSet,
   canvasSave,
+  credits,
+  dramaGet,
+  dramaJobCancel,
+  dramaJobs,
+  dramaList,
+  dramaUnit,
+  dramaUnits,
+  generate,
   login,
   logout,
+  modelList,
+  modelShow,
   parseArgs,
   taskGet,
   taskWait,
@@ -33,12 +46,13 @@ const USAGE = `video-canvas-cli（beta）— 连镜命令行
 用法：
   video-canvas-cli <命令> [参数]
 
-登录
-  login [--base URL] [--name 名称] [--no-open]   设备授权登录（在浏览器里确认）
+身份与会话
+  login [--base URL] [--name 名称] [--no-open]   设备授权登录（在浏览器里确认一次，默认 30 天免登录）
   logout                                          删除本地凭据
   whoami                                          查看当前身份
+  version                                         打印 CLI 版本（与站点版本独立）
 
-画布
+画布（读写）
   canvas list [--page N] [--page-size N]
   canvas get <code>
   canvas create --title <标题> [--payload 文件]
@@ -48,16 +62,42 @@ const USAGE = `video-canvas-cli（beta）— 连镜命令行
   canvas save <code> --payload 文件 [--revision N]
                                         要 canvas graph 的输出，不是 canvas export 的导出文档
 
-节点级编辑（每次都要在终端确认）
+画布节点级编辑（每次都要在终端确认）
   canvas node add <code> --kind <script|image|video|audio> [--label 标题] [--text 正文] [--prompt 提示词]
                         [--model 模型] [--at x,y]
   canvas node set <code> <节点id> [--label 标题] [--text 正文] [--prompt 提示词] [--model 模型]
   canvas node rm <code> <节点id> [更多节点id...]
                                         只提交差异；服务端按 revision 乐观锁写入
 
+模型与积分
+  model list [--kind image|video|audio|text]      看有哪些模型、key 是什么
+  model show <模型key>                            看这个模型的参数（--param 能填什么）与参考素材上限
+  credits                                         余额 / 冻结 / 可用积分
+
+生成（提交后产物由画布回填到节点）
+  generate image|video|audio|text --model <模型key> [--canvas <画布编号> --node <节点id>]
+            [--prompt 提示词] [--param 名=值]... [--input '<json>'|@文件|-]
+            [--ref-image 素材id]... [--ref-video 素材id]... [--ref-audio 素材id]...
+            [--count 1] [--wait] [--timeout 600] [--interval 3]
+
+合成成片
+  canvas compose <code> --node <成片节点id> [--assets 素材id,素材id...] [--seqs 1,2,3]
+                          [--mode storyboard|compose|selection] [--wait] [--timeout 900]
+                                        不给 --assets 时按成片节点的上游顺序推导并打印出来
+  canvas compose-status <code> [--job 任务id | --node 节点id]
+  canvas compose-cancel <code> --job 任务id
+
 生成任务
   task get <id|task_ref>
   task wait <id|task_ref> [--timeout 600] [--interval 3]
+
+短剧（只读与任务控制；建项目、改剧本、跑任务仍在网页里）
+  drama list [--keyword 关键词] [--page N] [--page-size N]
+  drama get <短剧编号>
+  drama units <短剧编号> [--from 1] [--to 20]
+  drama unit <短剧编号> <单元号>
+  drama jobs <短剧编号> [--active]
+  drama job-cancel <短剧编号> --job 任务id
 
 运行记录（转发 scripts/agent-trace；独立安装包用 --script 或 VC_AGENT_TRACE 指定）
   trace pull [--since 7d] [--feedback down] ...
@@ -69,10 +109,8 @@ const USAGE = `video-canvas-cli（beta）— 连镜命令行
   --base URL      覆盖 API 地址（也可用环境变量 VC_API_BASE）
   --no-update-check  本次不检查新版本（也可用 VC_NO_UPDATE_CHECK=1）
 
-版本
-  version         打印 CLI 版本（与站点版本独立）；加 --json 输出机器可读信息
-
-退出码：0 成功，1 业务或网络错误（含任务失败），2 用法错误，3 task wait 等待超时，4 节点级修改被取消
+退出码：0 成功，1 业务或网络错误（含任务失败），2 用法错误，
+        3 等待超时（--wait / task wait），4 节点级修改被取消
 
 当前是 beta 渠道：命令与参数尽量稳定，但输出格式和提示语仍可能调整。
 升级提示写在 stderr；非交互终端与 --json 场景不会打扰脚本。
@@ -99,6 +137,12 @@ async function runCanvas(ctx, positional, flags) {
       return canvasSave(ctx, args);
     case "node":
       return runCanvasNode(ctx, rest, flags);
+    case "compose":
+      return canvasCompose(ctx, { positional: rest, flags });
+    case "compose-status":
+      return canvasComposeStatus(ctx, { positional: rest, flags });
+    case "compose-cancel":
+      return canvasComposeCancel(ctx, { positional: rest, flags });
     default:
       throw new APIError(-1, `未知的 canvas 子命令：${sub || "（空）"}\n\n${USAGE}`, 2);
   }
@@ -132,6 +176,42 @@ async function runTask(ctx, positional, flags) {
       return taskWait(ctx, args);
     default:
       throw new APIError(-1, `未知的 task 子命令：${sub || "（空）"}\n\n${USAGE}`, 2);
+  }
+}
+
+/** 模型子命令。 */
+async function runModel(ctx, positional, flags) {
+  const [sub, ...rest] = positional;
+  const args = { positional: rest, flags };
+  switch (sub) {
+    case "list":
+      return modelList(ctx, args);
+    case "show":
+      return modelShow(ctx, args);
+    default:
+      throw new APIError(-1, `未知的 model 子命令：${sub || "（空）"}\n\n${USAGE}`, 2);
+  }
+}
+
+/** 短剧子命令。 */
+async function runDrama(ctx, positional, flags) {
+  const [sub, ...rest] = positional;
+  const args = { positional: rest, flags };
+  switch (sub) {
+    case "list":
+      return dramaList(ctx, args);
+    case "get":
+      return dramaGet(ctx, args);
+    case "units":
+      return dramaUnits(ctx, args);
+    case "unit":
+      return dramaUnit(ctx, args);
+    case "jobs":
+      return dramaJobs(ctx, args);
+    case "job-cancel":
+      return dramaJobCancel(ctx, args);
+    default:
+      throw new APIError(-1, `未知的 drama 子命令：${sub || "（空）"}\n\n${USAGE}`, 2);
   }
 }
 
@@ -208,6 +288,14 @@ async function main(argv) {
         return await runCanvas(ctx, positional, flags);
       case "task":
         return await runTask(ctx, positional, flags);
+      case "model":
+        return await runModel(ctx, positional, flags);
+      case "drama":
+        return await runDrama(ctx, positional, flags);
+      case "generate":
+        return await generate(ctx, { positional, flags });
+      case "credits":
+        return await credits(ctx, { positional, flags });
       case "trace":
         return await trace(ctx, { positional, flags });
       default:
