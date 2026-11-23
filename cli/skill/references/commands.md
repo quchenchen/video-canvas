@@ -58,6 +58,7 @@ generate <image|video|audio|text> --model <模型key>
          [--canvas <画布编号> --node <节点id>] [--prompt <提示词>]
          [--param 名=值]... [--input '<json>'|@文件|-]
          [--ref-image <素材id>]... [--ref-video <素材id>]... [--ref-audio <素材id>]...
+         [--param mode=keyframe]          首帧/尾帧锁定：第一张图为首帧，第二张为尾帧
          [--count 1] [--wait] [--timeout 600] [--interval 3]
          [--idempotency-key <值>]
 ```

@@ -85,6 +85,22 @@ vc generate image --model <模型key> --prompt "<提示词>" \
 - `--param` 只能填 `model show` 列出的名字；值先按 JSON 解释（`5` → 数字，`true` → 布尔），解不出按字符串。
 - `--count N` 一次多个结果，都绑同一个节点（需要 `--node`）。
 - `--ref-image` / `--ref-video` / `--ref-audio` 给素材 id（纯数字），可给多次。
+
+**首帧 / 尾帧要显式声明**：只给 `--ref-image` 时走的是「参考生成」——图片影响风格与内容，但不锁首帧。
+要钉住首帧、或首尾帧都钉住，加 `--param mode=keyframe`，此时第一张是首帧、第二张是尾帧：
+
+```bash
+# 只锁首帧
+vc generate video --model <模型> --prompt "..." --canvas <画布> --node <节点> \
+  --param mode=keyframe --ref-image <首帧素材id>
+# 首帧 + 尾帧
+vc generate video --model <模型> --prompt "..." --canvas <画布> --node <节点> \
+  --param mode=keyframe --ref-image <首帧素材id> --ref-image <尾帧素材id>
+```
+
+做连续多镜（含首尾循环的短片）时，让相邻两段共用一张图：上段的尾帧就是下段的头帧，
+接缝才是同一帧而不是「看起来像」；最后一段的尾帧回到第一段的首帧，循环点才闭得死。
+能否真的复刻取决于模型能力：`agnes-*-flash` 只做到构图一致，人物会被重绘，要严格锁帧得换更强的模型。
 - 复杂参数用 `--input '<json>'`、`--input @file.json` 或 `--input -`（读标准输入）。
 
 **产物由服务端写回节点**：任务进入终态后，服务端把产物写进节点并推 `canvas.patch`，
