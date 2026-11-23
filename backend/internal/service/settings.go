@@ -48,6 +48,14 @@ const (
 	DefaultMCPCallTimeoutSeconds = 60
 	minMCPCallTimeoutSeconds     = 5
 	maxMCPCallTimeoutSeconds     = 300
+
+	// DefaultCLITokenDays 是命令行登录态的有效期：设备授权签发的 JWT 活这么久，缺省 30 天。
+	// 网页登录仍按 jwt.expire_hours（72 小时）走——两者的使用场景不同：
+	// 命令行是「装一次、长期用」，每天重登没法用；网页多设备共用一台机器时才需要短会话。
+	// 它**不是**任务等待超时，也不是外部接入的单次调用超时，别把三个数并成一个。
+	DefaultCLITokenDays = 30
+	minCLITokenDays     = 1
+	maxCLITokenDays     = 365
 )
 
 // SettingsService 管理“库值优先、代码常量兜底”的系统设置：注册开关、初始积分、默认并发上限。
@@ -76,6 +84,7 @@ func (s *SettingsService) RegisterSettings(ctx context.Context) (*model.Register
 		QueueMaxWaitMinutes:   DefaultQueueMaxWaitMinutes,
 		MCPTokenDays:          DefaultMCPTokenDays,
 		MCPCallTimeout:        DefaultMCPCallTimeoutSeconds,
+		CLITokenDays:          DefaultCLITokenDays,
 	}
 	// 库值损坏（非数字、越界）时忽略它而不是报错：设置读取在注册、提交任务的热路径上，不能因为一行脏数据让它们不可用
 	if n, err := strconv.Atoi(kv[model.SettingInitialCredits]); err == nil && n >= 0 && n <= maxInitialCredits {
@@ -95,6 +104,9 @@ func (s *SettingsService) RegisterSettings(ctx context.Context) (*model.Register
 	}
 	if n, err := strconv.Atoi(kv[model.SettingMCPCallTimeout]); err == nil && n >= minMCPCallTimeoutSeconds && n <= maxMCPCallTimeoutSeconds {
 		v.MCPCallTimeout = n
+	}
+	if n, err := strconv.Atoi(kv[model.SettingCLITokenDays]); err == nil && n >= minCLITokenDays && n <= maxCLITokenDays {
+		v.CLITokenDays = n
 	}
 	return v, nil
 }
@@ -162,6 +174,15 @@ func (s *SettingsService) MCPCallTimeout(ctx context.Context) (time.Duration, er
 	return time.Duration(v.MCPCallTimeout) * time.Second, nil
 }
 
+// CLITokenDays 返回命令行登录态的有效期（天）。实现 service.CLITokenPolicy。
+func (s *SettingsService) CLITokenDays(ctx context.Context) (int, error) {
+	v, err := s.RegisterSettings(ctx)
+	if err != nil {
+		return 0, err
+	}
+	return v.CLITokenDays, nil
+}
+
 // QueueConcurrency 返回当前设置的并发（每实例同时处理的任务数）。库里没有或值非法时用默认值；
 // 不做硬上限裁剪（硬上限在配置文件里，由队列运行时在应用时裁剪）。读取在后台刷新循环里，脏数据按默认处理而不是报错。
 func (s *SettingsService) QueueConcurrency(ctx context.Context) (int, error) {
@@ -208,6 +229,13 @@ func (s *SettingsService) UpdateRegisterSettings(ctx context.Context, actorID ui
 	if req.MCPTokenDays < minMCPTokenDays || req.MCPTokenDays > maxMCPTokenDays {
 		return nil, errcode.ErrInvalidParams.WithMsg("令牌默认有效期必须在 " + strconv.Itoa(minMCPTokenDays) + " 到 " + strconv.Itoa(maxMCPTokenDays) + " 天之间")
 	}
+	// 老客户端不带这个字段（0）：按默认值处理，不能让保存整体失败
+	if req.CLITokenDays == 0 {
+		req.CLITokenDays = DefaultCLITokenDays
+	}
+	if req.CLITokenDays < minCLITokenDays || req.CLITokenDays > maxCLITokenDays {
+		return nil, errcode.ErrInvalidParams.WithMsg("命令行登录有效期必须在 " + strconv.Itoa(minCLITokenDays) + " 到 " + strconv.Itoa(maxCLITokenDays) + " 天之间")
+	}
 
 	// 2. 记下改前的值用于审计，再一次性写库
 	before, err := s.RegisterSettings(ctx)
@@ -222,6 +250,7 @@ func (s *SettingsService) UpdateRegisterSettings(ctx context.Context, actorID ui
 		model.SettingQueueMaxWaitMinutes:   strconv.Itoa(req.QueueMaxWaitMinutes),
 		model.SettingMCPTokenDays:          strconv.Itoa(req.MCPTokenDays),
 		model.SettingMCPCallTimeout:        strconv.Itoa(req.MCPCallTimeout),
+		model.SettingCLITokenDays:          strconv.Itoa(req.CLITokenDays),
 	}, actorID)
 	if err != nil {
 		return nil, err
@@ -235,5 +264,6 @@ func (s *SettingsService) UpdateRegisterSettings(ctx context.Context, actorID ui
 		RegisterEnabled: req.RegisterEnabled, InitialCredits: req.InitialCredits, DefaultMaxActiveTasks: req.DefaultMaxActiveTasks,
 		QueueMultiplier: req.QueueMultiplier, QueueMaxWaitMinutes: req.QueueMaxWaitMinutes,
 		MCPTokenDays: req.MCPTokenDays, MCPCallTimeout: req.MCPCallTimeout,
+		CLITokenDays: req.CLITokenDays,
 	}, nil
 }

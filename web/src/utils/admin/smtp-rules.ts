@@ -42,6 +42,8 @@ export type RegisterSettingsValues = {
   mcp_token_days: string;
   /** 外部接入单次调用超时（秒）输入 */
   mcp_call_timeout: string;
+  /** 命令行登录态有效期（天）输入 */
+  cli_token_days: string;
 };
 
 /** 注册设置字段级错误 */
@@ -52,7 +54,8 @@ export type RegisterSettingsErrors = Partial<
     | "queue_multiplier"
     | "queue_max_wait_minutes"
     | "mcp_token_days"
-    | "mcp_call_timeout",
+    | "mcp_call_timeout"
+    | "cli_token_days",
     string
   >
 >;
@@ -112,6 +115,7 @@ export function validateRegisterSettings(
     | "queue_max_wait_minutes"
     | "mcp_token_days"
     | "mcp_call_timeout"
+    | "cli_token_days"
   >,
 ): RegisterSettingsErrors {
   const errors: RegisterSettingsErrors = {};
@@ -130,6 +134,8 @@ export function validateRegisterSettings(
   const callTimeout = parseInteger(values.mcp_call_timeout);
   if (callTimeout === null || callTimeout < 5 || callTimeout > 300)
     errors.mcp_call_timeout = "范围 5 到 300";
+  const cliDays = parseInteger(values.cli_token_days);
+  if (cliDays === null || cliDays < 1 || cliDays > 365) errors.cli_token_days = "范围 1 到 365";
   return errors;
 }
 

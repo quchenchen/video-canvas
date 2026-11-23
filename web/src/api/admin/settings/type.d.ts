@@ -14,6 +14,8 @@ export interface RegisterSettings {
   mcp_token_days: number;
   /** 外部接入单次调用的服务端上限（秒），5 到 300：超过就中止并回可读错误 */
   mcp_call_timeout: number;
+  /** 命令行登录态的有效期（天），1 到 365：设备授权签发的登录态活这么久，缺省 30；与上面两项无关 */
+  cli_token_days: number;
 }
 
 /** SMTP 加密方式 */

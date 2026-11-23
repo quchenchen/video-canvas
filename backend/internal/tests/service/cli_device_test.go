@@ -110,23 +110,42 @@ func (f *fakeCLIUsers) GetByID(_ context.Context, id uint64) (*model.User, error
 	return u, nil
 }
 
-type fakeIssuer struct{}
+// fakeIssuer 记住最后一次签发的有效期，用来断言命令行登录态用的是 30 天而不是网页的 72 小时。
+type fakeIssuer struct{ ttl time.Duration }
 
-func (fakeIssuer) IssueToken(u *model.User) (*model.LoginView, error) {
-	tok, exp, err := utils.GenerateToken(uint(u.ID), u.Username, u.TokenVersion, testJWTSecret, "test", 1)
+func (f *fakeIssuer) IssueToken(u *model.User) (*model.LoginView, error) { return f.issue(u, time.Hour) }
+
+func (f *fakeIssuer) IssueTokenWithTTL(u *model.User, ttl time.Duration) (*model.LoginView, error) {
+	f.ttl = ttl
+	return f.issue(u, ttl)
+}
+
+func (f *fakeIssuer) issue(u *model.User, ttl time.Duration) (*model.LoginView, error) {
+	tok, exp, err := utils.GenerateTokenFor(uint(u.ID), u.Username, u.TokenVersion, testJWTSecret, "test", ttl)
 	if err != nil {
 		return nil, err
 	}
 	return &model.LoginView{Token: tok, ExpireAt: exp, Role: u.Role}, nil
 }
 
-type cliEnv struct {
-	svc  *CLIDeviceService
-	repo *fakeCLIDeviceRepo
-	now  time.Time
+// fakeTokenDays 模拟后台「注册设置」里的命令行登录有效期。
+type fakeTokenDays struct {
+	days int
+	err  error
 }
 
-func newCLIEnv(t *testing.T) *cliEnv {
+func (f fakeTokenDays) CLITokenDays(context.Context) (int, error) { return f.days, f.err }
+
+type cliEnv struct {
+	svc    *CLIDeviceService
+	repo   *fakeCLIDeviceRepo
+	now    time.Time
+	issuer *fakeIssuer
+}
+
+func newCLIEnv(t *testing.T) *cliEnv { return newCLIEnvWithPolicy(t, nil) }
+
+func newCLIEnvWithPolicy(t *testing.T, policy CLITokenPolicy) *cliEnv {
 	t.Helper()
 	now := time.Date(2026, 11, 23, 10, 0, 0, 0, time.UTC)
 	repo := newFakeCLIDeviceRepo()
@@ -135,11 +154,12 @@ func newCLIEnv(t *testing.T) *cliEnv {
 		8: {BaseModel: model.BaseModel{ID: 8}, Username: "banned", Role: model.RoleUser, Status: model.UserStatusDisabled},
 	}}
 	clock := now
+	issuer := &fakeIssuer{}
 	svc := NewCLIDeviceService(CLIDeviceDeps{
-		Repo: repo, Users: users, Issuer: fakeIssuer{},
+		Repo: repo, Users: users, Issuer: issuer, TokenDays: policy,
 		Now: func() time.Time { return clock },
 	})
-	return &cliEnv{svc: svc, repo: repo, now: now}
+	return &cliEnv{svc: svc, repo: repo, now: now, issuer: issuer}
 }
 
 func TestCLIDeviceStart(t *testing.T) {
@@ -211,6 +231,61 @@ func TestCLIDeviceApproveThenConsume(t *testing.T) {
 	again, err := env.svc.Poll(ctx, start.DeviceCode)
 	if err != nil || again.Status != "consumed" || again.Token != "" {
 		t.Fatalf("重放应为 consumed 且无令牌：%+v %v", again, err)
+	}
+}
+
+func TestCLIDeviceTokenTTLDefaultsTo30Days(t *testing.T) {
+	env := newCLIEnv(t)
+	ctx := context.Background()
+	start, err := env.svc.Start(ctx, "laptop")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := env.svc.Approve(ctx, 7, start.UserCode); err != nil {
+		t.Fatal(err)
+	}
+	got, err := env.svc.Poll(ctx, start.DeviceCode)
+	if err != nil || got.Token == "" {
+		t.Fatalf("应拿到令牌：%+v %v", got, err)
+	}
+	// 命令行登录态按 30 天算，不跟随网页会话的 expire_hours（72 小时）
+	if env.issuer.ttl != DefaultCLITokenTTL {
+		t.Fatalf("默认有效期应为 %v，实际 %v", DefaultCLITokenTTL, env.issuer.ttl)
+	}
+	wantExp := time.Now().Add(30 * 24 * time.Hour).Unix()
+	if diff := got.ExpireAt - wantExp; diff < -120 || diff > 120 {
+		t.Fatalf("令牌过期时间应约 30 天后，实际差 %d 秒", diff)
+	}
+}
+
+func TestCLIDeviceTokenTTLUsesSetting(t *testing.T) {
+	cases := []struct {
+		name   string
+		policy CLITokenPolicy
+		want   time.Duration
+	}{
+		{"后台改成 7 天", fakeTokenDays{days: 7}, 7 * 24 * time.Hour},
+		{"后台读不到设置回落 30 天", fakeTokenDays{err: errcode.ErrInternal}, DefaultCLITokenTTL},
+		{"后台给 0 也回落 30 天", fakeTokenDays{days: 0}, DefaultCLITokenTTL},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			env := newCLIEnvWithPolicy(t, tc.policy)
+			ctx := context.Background()
+			start, err := env.svc.Start(ctx, "laptop")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := env.svc.Approve(ctx, 7, start.UserCode); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := env.svc.Poll(ctx, start.DeviceCode); err != nil {
+				t.Fatal(err)
+			}
+			if env.issuer.ttl != tc.want {
+				t.Fatalf("有效期应为 %v，实际 %v", tc.want, env.issuer.ttl)
+			}
+		})
 	}
 }
 

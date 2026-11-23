@@ -138,6 +138,18 @@ func (s *UserService) Login(ctx context.Context, username, password string, meta
 // IssueToken 为用户签发 JWT 并组装登录响应（与登录同构）；个人中心改密码成功后用它给当前设备续签。
 func (s *UserService) IssueToken(u *model.User) (*model.LoginView, error) { return s.issueToken(u) }
 
+// IssueTokenWithTTL 按指定有效期签发 JWT：命令行设备授权用它（30 天），与网页会话的 expire_hours 分开。
+func (s *UserService) IssueTokenWithTTL(u *model.User, ttl time.Duration) (*model.LoginView, error) {
+	if ttl <= 0 {
+		return s.issueToken(u)
+	}
+	token, expireAt, err := utils.GenerateTokenFor(uint(u.ID), u.Username, u.TokenVersion, s.JWTSecret, s.JWTIssuer, ttl)
+	if err != nil {
+		return nil, err
+	}
+	return &model.LoginView{Token: token, ExpireAt: expireAt, Role: u.Role}, nil
+}
+
 // issueToken 为用户签发 JWT 并组装登录响应。
 func (s *UserService) issueToken(u *model.User) (*model.LoginView, error) {
 	token, expireAt, err := utils.GenerateToken(uint(u.ID), u.Username, u.TokenVersion, s.JWTSecret, s.JWTIssuer, s.JWTExpireHours)

@@ -12,6 +12,10 @@ const (
 	SettingMCPTokenDays          = "mcp_token_days"           //nolint:gosec // 设置键名，不是凭证
 	// MCP 令牌默认有效期（天，1–90），签发时不填就用它，缺省 30
 	SettingMCPCallTimeout = "mcp_call_timeout" // MCP 单次调用超时（秒，5–300），超过就中止并回可读错误，缺省 60
+	// SettingCLITokenDays 是命令行登录态的有效期（天，1–365），缺省 30。
+	// 它只决定「命令行签发的 JWT 多久过期」，与上面的 mcp_token_days（外部接入令牌）、
+	// mcp_call_timeout（单次调用超时）是三件不同的事，不要混用。
+	SettingCLITokenDays = "cli_token_days" //nolint:gosec // 设置键名，不是凭证
 )
 
 // SystemSetting 系统设置的键值表（值统一存文本）。
@@ -34,6 +38,7 @@ type RegisterSettingsView struct {
 	QueueMaxWaitMinutes   int  `json:"queue_max_wait_minutes" binding:"min=5,max=1440" label:"排队超时"`        // 排队等名额的最长时间（分钟）
 	MCPTokenDays          int  `json:"mcp_token_days" binding:"omitempty,min=1,max=90" label:"令牌默认有效期"`     // 外部接入令牌不填天数时用它（天）
 	MCPCallTimeout        int  `json:"mcp_call_timeout" binding:"omitempty,min=5,max=300" label:"MCP 调用超时"` // 外部接入单次调用的服务端上限（秒）
+	CLITokenDays          int  `json:"cli_token_days" binding:"omitempty,min=1,max=365" label:"命令行登录有效期"` // 命令行设备授权签发的登录态有效天数
 }
 
 // 登录页展示（showcase）相关的系统设置键，值统一存文本；库值缺省或非法时由 service 回落默认。

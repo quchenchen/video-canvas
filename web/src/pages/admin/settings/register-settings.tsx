@@ -32,6 +32,7 @@ const toValues = (settings: RegisterSettings): RegisterSettingsValues => ({
   queue_max_wait_minutes: String(settings.queue_max_wait_minutes),
   mcp_token_days: String(settings.mcp_token_days),
   mcp_call_timeout: String(settings.mcp_call_timeout),
+  cli_token_days: String(settings.cli_token_days),
 });
 
 /**
@@ -69,6 +70,7 @@ function RegisterForm({
         queue_max_wait_minutes: Number(values.queue_max_wait_minutes),
         mcp_token_days: Number(values.mcp_token_days),
         mcp_call_timeout: Number(values.mcp_call_timeout),
+        cli_token_days: Number(values.cli_token_days),
       });
       if (!aliveRef.current) return;
       toast.success("注册设置已保存");
@@ -203,6 +205,23 @@ function RegisterForm({
                 aria-invalid={!!errors.mcp_call_timeout}
                 onChange={(event) =>
                   setValues((prev) => ({ ...prev, mcp_call_timeout: event.target.value }))
+                }
+              />
+            </FormField>
+            <FormField
+              label="命令行登录有效期（天）"
+              htmlFor="register-cli-token-days"
+              hint="1–365；只决定 vc 登录一次能免登录用多久，不是任务等待超时"
+              error={errors.cli_token_days}
+            >
+              <Input
+                id="register-cli-token-days"
+                inputMode="numeric"
+                value={values.cli_token_days}
+                disabled={!canWrite || saving}
+                aria-invalid={!!errors.cli_token_days}
+                onChange={(event) =>
+                  setValues((prev) => ({ ...prev, cli_token_days: event.target.value }))
                 }
               />
             </FormField>
