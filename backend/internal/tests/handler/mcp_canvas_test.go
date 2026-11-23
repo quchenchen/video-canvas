@@ -415,3 +415,50 @@ func TestMCPDramaToolsRequireCanvas(t *testing.T) {
 		t.Fatalf("没指定画布应回可执行提示，得到 %q isError=%v", text, isErr)
 	}
 }
+
+// stubDramas 给 drama_list 用：只证明「列出来的是短剧画布 code」，不涉及短剧业务。
+type stubDramas struct{}
+
+func (stubDramas) List(_ context.Context, _ uint64, _ string, _, _ int) ([]model.DramaProject, int64, error) {
+	return []model.DramaProject{{CanvasID: 7, Title: "测试短剧", Status: "ready", Phase: "done", TargetEpisodes: 3}}, 1, nil
+}
+
+// TestMCPDramaListReturnsCanvasCode 短剧不在 canvas_list 里，drama_list 必须给出能直接填进
+// drama_* 的 canvas 参数——也就是短剧画布的 code，不是短剧项目 id。
+func TestMCPDramaListReturnsCanvasCode(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	srv := mcp.NewServer(&mcpStubTools{}, &mcpStubCanvases{})
+	srv.SetDramaDirectory(stubDramas{})
+	r := gin.New()
+	r.POST("/mcp", func(c *gin.Context) {
+		c.Set(middleware.CtxMCPProjectIDKey, uint64(1))
+		c.Set(middleware.CtxMCPScopesKey, scopeSet(model.MCPScopeDramaRead))
+		c.Set(middleware.CtxUserIDKey, uint(7))
+		c.Next()
+	}, srv.Handle)
+
+	resp := postMCP(t, r, `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"drama_list","arguments":{}}}`)
+	text, isErr := resultText(t, resp)
+	if isErr {
+		t.Fatalf("drama_list 失败：%s", text)
+	}
+	var out struct {
+		Dramas []struct {
+			Canvas string `json:"canvas"`
+			Title  string `json:"title"`
+		} `json:"dramas"`
+		Total int `json:"total"`
+	}
+	if err := json.Unmarshal([]byte(text), &out); err != nil {
+		t.Fatalf("drama_list 结果不是 JSON：%s", text)
+	}
+	if out.Total != 1 || len(out.Dramas) != 1 {
+		t.Fatalf("应该列出一条短剧，得到 %+v", out)
+	}
+	if out.Dramas[0].Canvas != idcodec.Encode(7) {
+		t.Fatalf("canvas 必须是可以直接用的画布 code，得到 %q", out.Dramas[0].Canvas)
+	}
+	if out.Dramas[0].Title != "测试短剧" {
+		t.Fatalf("标题丢了：%+v", out.Dramas[0])
+	}
+}

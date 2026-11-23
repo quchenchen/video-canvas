@@ -19,7 +19,8 @@ const CanvasListToolName = "canvas_list"
 var canvasListTool = tool{
 	Name: CanvasListToolName,
 	Description: "列出这个账号名下的画布：code、标题、修订号、更新时间。外部接入的画布类工具都要在调用时用 canvas 参数填画布 code，" +
-		"这里就是查 code 的地方。可以按标题关键字过滤，默认按更新时间倒序。",
+		"这里就是查 code 的地方。可以按标题关键字过滤，默认按更新时间倒序。" +
+		"短剧项目不在这个列表里，要用 drama_list 查。",
 	InputSchema: json.RawMessage(`{"type":"object","properties":{"keyword":{"type":"string","description":"按标题模糊过滤，可空"},"limit":{"type":"integer","description":"最多返回多少条，默认 50，上限 200"}}}`),
 }
 
