@@ -44,6 +44,8 @@ const (
 
 // defaultTokenName 是新建项目自动签发、以及「重新生成」时用的令牌名。
 // 一个项目只有一枚令牌，用途没有区分余地，名字只是给人看的。
+//
+//nolint:gosec // 这是令牌的显示名，不是凭据
 const defaultTokenName = "接入令牌"
 
 // MCPAuditWriter 写给后台操作审计用；MCP 项目的建改删与令牌签发注销都要留痕。
