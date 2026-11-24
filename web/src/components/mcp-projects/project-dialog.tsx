@@ -10,6 +10,7 @@ import {
   DialogTitle,
 } from "@/components/admin-ui/dialog";
 import { FormField } from "@/components/admin-ui/form-field";
+import { DialogSession } from "@/components/dialog-session";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
@@ -25,11 +26,38 @@ export type ProjectDialogTarget = { kind: "new" } | { kind: "edit"; item: MCPPro
  * 新建时只填名称与能力：归属就是当前登录用户，默认画布留空——那两项不是新建时该做的决定。
  * 编辑时多给一个「默认画布」，因为它是「配一次、以后每次调用都用」的东西。
  *
+ * 弹窗常驻挂载，正文交给 DialogSession：关闭后留着播退出动画，每次打开从头开始（规范 6.3）。
+ *
  * @param target 打开的对象，null 表示关闭
  * @param state 页面数据层，保存走 state.create / state.update
  * @param onClose 关闭（保存成功也走这里）
  */
 export function ProjectDialog({
+  target,
+  state,
+  onClose,
+}: {
+  target: ProjectDialogTarget | null;
+  state: MCPProjectsState;
+  onClose: () => void;
+}) {
+  const open = target !== null;
+  // 关闭时 target 变 null，正文要留到退出动画播完，所以记住最后一次打开的对象
+  const [shown, setShown] = useState<ProjectDialogTarget | null>(target);
+  if (target && target !== shown) setShown(target);
+  return (
+    <Dialog open={open} onOpenChange={(next) => !next && onClose()}>
+      <DialogContent className="flex max-h-[min(88svh,760px)] flex-col sm:max-w-lg">
+        <DialogSession open={open}>
+          {shown && <ProjectForm target={shown} state={state} onClose={onClose} />}
+        </DialogSession>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/** 弹窗正文：标题、字段和底部按钮；字段区自己滚动，别把弹窗撑出屏幕。 */
+function ProjectForm({
   target,
   state,
   onClose,
@@ -56,24 +84,24 @@ export function ProjectDialog({
   };
 
   return (
-    <Dialog open onOpenChange={(next) => !next && onClose()}>
-      <DialogContent className="sm:max-w-lg">
-        <DialogHeader>
-          <DialogTitle>{editing ? `编辑「${editing.name}」` : "新建接入项目"}</DialogTitle>
-          <DialogDescription>
-            {editing
-              ? "改完立刻生效，已签发的令牌不用换。"
-              : "归属就是你本人；默认画布留空，调用时自己带。"}
-          </DialogDescription>
-        </DialogHeader>
-        <form
-          noValidate
-          className="grid gap-4"
-          onSubmit={(event) => {
-            event.preventDefault();
-            void submit();
-          }}
-        >
+    <>
+      <DialogHeader>
+        <DialogTitle>{editing ? `编辑「${editing.name}」` : "新建接入项目"}</DialogTitle>
+        <DialogDescription>
+          {editing
+            ? "改完立刻生效，已签发的令牌不用换。"
+            : "归属就是你本人；默认画布留空，调用时自己带。"}
+        </DialogDescription>
+      </DialogHeader>
+      <form
+        noValidate
+        className="flex min-h-0 flex-1 flex-col gap-4"
+        onSubmit={(event) => {
+          event.preventDefault();
+          void submit();
+        }}
+      >
+        <div className="grid min-h-0 flex-1 gap-4 overflow-y-auto">
           <FormField label="名称" htmlFor="mcp-project-name">
             <Input
               id="mcp-project-name"
@@ -104,16 +132,16 @@ export function ProjectDialog({
             scopes={form.scopes}
             onChange={(scopes) => setForm({ ...form, scopes })}
           />
-          <DialogFooter>
-            <Button type="button" variant="ghost" onClick={onClose}>
-              取消
-            </Button>
-            <Button type="submit" disabled={state.busy}>
-              {editing ? "保存" : "创建"}
-            </Button>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
+        </div>
+        <DialogFooter>
+          <Button type="button" variant="ghost" onClick={onClose}>
+            取消
+          </Button>
+          <Button type="submit" disabled={state.busy}>
+            {editing ? "保存" : "创建"}
+          </Button>
+        </DialogFooter>
+      </form>
+    </>
   );
 }

@@ -172,27 +172,6 @@ describe("tokenStatus", () => {
   });
 });
 
-describe("mcpConfigSnippet", () => {
-  test("拼出带 Authorization 的宿主配置，端点用当前 origin", () => {
-    const snippet = mcpConfigSnippet("vcm_abc", "/api/v1/mcp", "https://lj.igeewa.com");
-    expect(JSON.parse(snippet)).toEqual({
-      mcpServers: {
-        "video-canvas": {
-          type: "http",
-          url: "https://lj.igeewa.com/api/v1/mcp",
-          headers: { Authorization: "Bearer vcm_abc" },
-          timeout: 60,
-        },
-      },
-    });
-  });
-
-  test("origin 末尾有斜杠时不拼出双斜杠", () => {
-    const snippet = mcpConfigSnippet("vcm_abc", "/api/v1/mcp", "https://a.com/");
-    expect(JSON.parse(snippet).mcpServers["video-canvas"].url).toBe("https://a.com/api/v1/mcp");
-  });
-});
-
 describe("formatMCPTime", () => {
   test("空值显示破折号", () => {
     expect(formatMCPTime(undefined)).toBe("—");
@@ -205,5 +184,31 @@ describe("formatMCPTime", () => {
 
   test("非法时间原样返回", () => {
     expect(formatMCPTime("坏值")).toBe("坏值");
+  });
+});
+
+describe("mcpConfigSnippet", () => {
+  test("拼出带 Authorization 的宿主配置，端点用当前 origin", () => {
+    const snippet = mcpConfigSnippet("vcm_abc", "/api/v1/mcp", "https://lj.igeewa.com");
+    expect(JSON.parse(snippet)).toEqual({
+      mcpServers: {
+        "video-canvas": {
+          type: "http",
+          url: "https://lj.igeewa.com/api/v1/mcp",
+          headers: { Authorization: "Bearer vcm_abc" },
+          timeout: 60_000,
+        },
+      },
+    });
+  });
+
+  test("origin 末尾有斜杠时不拼出双斜杠", () => {
+    const snippet = mcpConfigSnippet("vcm_abc", "/api/v1/mcp", "https://a.com/");
+    expect(JSON.parse(snippet).mcpServers["video-canvas"].url).toBe("https://a.com/api/v1/mcp");
+  });
+
+  test("客户端超时按毫秒给（60 秒 = 60000），不是秒", () => {
+    const snippet = mcpConfigSnippet("vcm_abc", "/api/v1/mcp", "https://a.com");
+    expect(JSON.parse(snippet).mcpServers["video-canvas"].timeout).toBe(60_000);
   });
 });

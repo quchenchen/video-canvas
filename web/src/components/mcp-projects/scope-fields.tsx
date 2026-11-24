@@ -1,3 +1,5 @@
+import { FormField } from "@/components/admin-ui/form-field";
+import { ToggleChip } from "@/components/admin-ui/toggle-chip";
 import {
   MCP_SCOPES,
   MCP_SCOPE_GROUPS,
@@ -12,11 +14,18 @@ import {
  * 勾上会补全它依赖的档位，取消会连带关掉依赖它的档位——权限之间不互斥，
  * 界面上不会留下「给了写却没给读」这种配了也用不了的组合。
  *
- * 画布与短剧是两条并列的能力域，分块摆：MCP 是独立的能力出口，不是「画布的子功能」。
+ * 画布与短剧是两条并列的能力域，分行摆：MCP 是独立的能力出口，不是「画布的子功能」。
+ * 用 ToggleChip 而不是复选框加长说明，和后台其它「能力」多选一致（coding-standards 6.2）。
  *
  * @param scopes 当前勾选的档位
  * @param onChange 勾选结果变化时回调（已经补全依赖）
  */
+/** 胶囊悬停说明：一句话讲清这一档做什么，有前置依赖就顺带写上。 */
+const chipTitle = (value: string, hint: string) => {
+  const requires = scopeRequiresLabel(value);
+  return requires ? `${hint} · 需要「${requires}」` : hint;
+};
+
 export function ScopeChecklist({
   scopes,
   onChange,
@@ -24,36 +33,35 @@ export function ScopeChecklist({
   scopes: string[];
   onChange: (next: string[]) => void;
 }) {
-  const toggle = (value: string, checked: boolean) =>
-    onChange(checked ? expandMCPScopes([...scopes, value]) : dropMCPScope(scopes, value));
+  /** 点一下切换：勾上补依赖，取消连带收掉依赖它的档位。 */
+  const toggle = (value: string) =>
+    onChange(
+      scopes.includes(value) ? dropMCPScope(scopes, value) : expandMCPScopes([...scopes, value]),
+    );
   return (
-    <div className="grid gap-4">
-      {MCP_SCOPE_GROUPS.map((group) => (
-        <fieldset key={group.key}>
-          <legend className="text-muted-foreground mb-2 text-xs">{group.label}能力</legend>
-          <div className="grid gap-3 sm:grid-cols-2">
+    <FormField label="能力" tip="勾上会自动带上它依赖的档位，取消会连带关掉依赖它的档位">
+      <div className="grid gap-2">
+        {MCP_SCOPE_GROUPS.map((group) => (
+          <div
+            key={group.key}
+            role="group"
+            aria-label={`${group.label}能力`}
+            className="flex flex-wrap items-center gap-2"
+          >
+            <span className="text-muted-foreground w-8 shrink-0 text-xs">{group.label}</span>
             {MCP_SCOPES.filter((scope) => scope.group === group.key).map((scope) => (
-              <label key={scope.value} className="flex items-start gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  className="mt-1"
-                  checked={scopes.includes(scope.value)}
-                  onChange={(e) => toggle(scope.value, e.target.checked)}
-                />
-                <span>
-                  {scope.label}
-                  <span className="text-muted-foreground block text-xs">{scope.hint}</span>
-                  {scopeRequiresLabel(scope.value) && (
-                    <span className="text-muted-foreground block text-xs">
-                      需要：{scopeRequiresLabel(scope.value)}
-                    </span>
-                  )}
-                </span>
-              </label>
+              <ToggleChip
+                key={scope.value}
+                pressed={scopes.includes(scope.value)}
+                title={chipTitle(scope.value, scope.hint)}
+                onClick={() => toggle(scope.value)}
+              >
+                {scope.label}
+              </ToggleChip>
             ))}
           </div>
-        </fieldset>
-      ))}
-    </div>
+        ))}
+      </div>
+    </FormField>
   );
 }

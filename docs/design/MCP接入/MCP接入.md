@@ -395,7 +395,7 @@ CREATE INDEX idx_mcp_project_tokens_project ON mcp_project_tokens (project_id);
 | 不落画布的工具 | `RunContext.NoCanvas`：`task_get` / `model_list` / `skill_search` / `skill_read` 在项目没配默认画布时不再被「缺少 canvas_id」挡住 |
 | 对外语义 | `externalDescriptions["generate_media"]` 重写说明（提交即返回、用 `task_get` 查进度）；schema 里摘掉对这条通道无意义的 `wait` |
 | 接口 | `GET /admin/mcp/projects/:id/tokens/:tokenId/secret`、`GET /me/mcp/projects/:id/tokens/:tokenId/secret` |
-| 前端 | 新建/编辑共用 `project-dialog.tsx`（`PageHeaderActions` + `Dialog`，不再是页内表单）；`scope-fields.tsx` 勾选走依赖闭包；`copy-secret-button.tsx` 点时才取明文；`AccessInfo` 常驻端点 + 配置片段（含 `timeout: 60`）；令牌按钮在已有令牌时显示「重新签发」 |
+| 前端 | 新建/编辑共用 `project-dialog.tsx`（`PageHeaderActions` + `Dialog`，不再是页内表单）；`scope-fields.tsx` 勾选走依赖闭包；`copy-secret-button.tsx` 点时才取明文；`AccessInfo` 常驻端点 + 配置片段（含 `timeout: 60000`，单位毫秒）；令牌按钮在已有令牌时显示「重新签发」 |
 
 ### 2.88 实测（`0.7.9-mcp8`，`https://lj.igeewa.com`）
 
@@ -523,3 +523,36 @@ CREATE INDEX idx_mcp_project_tokens_project ON mcp_project_tokens (project_id);
 - 后端：`TestMCPOwnedCreateForcesSelfAndAllowsNoDefaultCanvas` 增加「返回里必须带首枚令牌明文」的断言；
   `go test ./internal/tests/service/ ./internal/tests/handler/ -run MCP` 全绿。
 - 前端：`tsc -b` 无错；`bun test src/tests/utils/admin/` 960 项通过。
+
+## 19. 第六轮：按后台通用规范收敛界面（2026-11-24）
+
+### 为什么改
+
+第五轮收成「一个项目一枚令牌」后，页面上同一组信息出现了两遍：顶部的「接入信息」面板给端点 + 占位片段，
+展开项目后又给一次令牌 + 完整 JSON 片段。实际用起来还多出两类问题：弹窗是打开时才挂载的（关闭没有退出动画），
+能力勾选用的是原生复选框加三行小字说明，和后台上其它「能力」多选长得不一样。
+
+### 改了什么
+
+| 层 | 改动 |
+| --- | --- |
+| 接入配置 | 展开项目就是两块：**API Key**（单独一行、可单独复制）与**配置片段**（粘贴即可用的完整 JSON，地址与令牌都在里面）。页面顶部那块重复的「接入信息」面板删掉 |
+| 令牌展示 | 取回明文后用 `SecretReveal`（绿框 + 等宽码 + 复制 + 隐藏），和后台「分析令牌」页同一套组件；未取回时显示 `prefix` + 打码点 |
+| 弹窗 | 常驻挂载 + `DialogSession`：关闭时正文留到退出动画播完，每次打开回到初始值；内容区限高自己滚动（规范 6.3） |
+| 能力勾选 | 换成按能力域分行的 `ToggleChip`，依赖关系写进悬停提示，不再用「需要：X」这种说明小字（规范 6.2） |
+| 错误处理 | 写操作失败不再自己弹 toast，交给全局拦截器；列表失败改为表格位置上的「项目列表加载失败 + 重试」（规范 §3） |
+| 顶部说明 | 删掉操作步骤式文案，只留 Beta 与授权 / 计费这类必须告知的事实 |
+| 代码 | `mcpConfigSnippet` 与它的测试一并删除（没了片段就没有生成器）；注释统一改 JSDoc |
+
+### 取舍
+
+- **去重的是「出现两遍」，不是片段本身**：片段要留（一次粘贴就能接上，比手填 URL + 头省事），
+  但地址与令牌只在它里面出现一次，页面别处不再单独铺一遍端点。
+- 片段格式目前只有 Claude 系那一种；将来要覆盖 Codex（TOML）这类，应当是「选客户端 → 给对应格式」，
+  而不是在页面上并排放几份。
+- 明文仍可随时取回（密文在 `secret_cipher`），所以「隐藏」只是收起显示，不是销毁凭证。
+
+### 验证
+
+- `tsc -b` 无错；`oxlint src/components/mcp-projects` 0 error；`bun test src/tests/utils/admin src/tests/components` 1305 项通过。
+- 线上（`0.7.9-mcpkey2`）：产物里不再有 `mcpConfigSnippet` 的痕迹，`SecretReveal` 组件随主包一起加载。

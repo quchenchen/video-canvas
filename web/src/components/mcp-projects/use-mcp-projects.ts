@@ -78,17 +78,20 @@ export function useMCPProjects(audience: MCPProjectsAudience = "admin") {
   const [items, setItems] = useState<MCPProjectItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
-  // 当前展开配置的项目 id
+  /** 当前展开配置的项目 id。 */
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  // 刚签发（含新建项目时自动签发）的令牌：明文只在这一份状态里存在
+  /** 刚签发（含新建项目时自动签发）的令牌：明文只在这一份状态里存在。 */
   const [issued, setIssued] = useState<IssuedMCPToken | null>(null);
+  /** 列表是否加载失败：失败时页面显示就地重试，不弹重复的请求错误提示。 */
+  const [listFailed, setListFailed] = useState(false);
 
   /** 拉项目列表并把结果写进状态；不碰 loading，首次加载由 useEffect 直接调它（effect 里不能同步 setState）。 */
   const reload = useCallback(async () => {
     try {
       setItems(await api.list());
+      setListFailed(false);
     } catch {
-      toast.error("项目列表加载失败");
+      setListFailed(true);
     } finally {
       setLoading(false);
     }
@@ -145,7 +148,6 @@ export function useMCPProjects(audience: MCPProjectsAudience = "admin") {
         await reload();
         return true;
       } catch {
-        toast.error("创建失败");
         return false;
       } finally {
         setBusy(false);
@@ -164,7 +166,6 @@ export function useMCPProjects(audience: MCPProjectsAudience = "admin") {
         await refresh();
         return true;
       } catch {
-        toast.error("保存失败");
         return false;
       } finally {
         setBusy(false);
@@ -187,7 +188,7 @@ export function useMCPProjects(audience: MCPProjectsAudience = "admin") {
         toast.success(enabled ? "已启用" : "已停用，该项目全部令牌立刻失效");
         await refresh();
       } catch {
-        toast.error(enabled ? "启用失败" : "停用失败");
+        // 失败原因由全局请求拦截器提示，这里只收起忙碌态
       } finally {
         setBusy(false);
       }
@@ -208,7 +209,7 @@ export function useMCPProjects(audience: MCPProjectsAudience = "admin") {
         }
         await refresh();
       } catch {
-        toast.error("删除失败");
+        // 同上：提示由全局拦截器给出
       } finally {
         setBusy(false);
       }
@@ -229,7 +230,7 @@ export function useMCPProjects(audience: MCPProjectsAudience = "admin") {
         await refresh();
         toast.success("新令牌已生成，旧令牌立刻失效");
       } catch {
-        toast.error("重新生成失败");
+        // 同上：提示由全局拦截器给出
       } finally {
         setBusy(false);
       }
@@ -237,11 +238,8 @@ export function useMCPProjects(audience: MCPProjectsAudience = "admin") {
     [api, refresh],
   );
 
-  /** 取回项目那枚令牌的明文：「显示配置片段」用，明文不进页面状态。 */
+  /** 取回项目那枚令牌的明文：「获取并复制」用，明文留在调用方的局部状态里。 */
   const tokenSecret = useCallback((projectId: string) => api.secret(projectId), [api]);
-
-  /** 清掉刚签发的明文（用户点「我已复制」之后）。 */
-  const clearIssued = useCallback(() => setIssued(null), []);
 
   return {
     items,
@@ -249,6 +247,7 @@ export function useMCPProjects(audience: MCPProjectsAudience = "admin") {
     busy,
     selectedId,
     issued,
+    listFailed,
     refresh,
     toggleTokens,
     create,
@@ -257,6 +256,5 @@ export function useMCPProjects(audience: MCPProjectsAudience = "admin") {
     remove,
     rotate,
     tokenSecret,
-    clearIssued,
   };
 }
