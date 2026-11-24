@@ -150,12 +150,10 @@ export const TOKEN_STATUS_LABEL: Record<MCPTokenStatus, string> = {
 };
 
 /**
- * 拼出可直接粘贴到外部 AI 工具里的配置片段：端点用当前站点的 origin，
- * 这样换域名部署不用改后台配置。
- */
-/**
- * 生成可直接粘贴的配置片段。
- * timeout 是客户端等待上限（秒）：做法务求不被客户端先掐断，服务端另有「MCP 调用超时」由管理员配。
+ * 生成可直接粘贴的配置片段：端点用当前站点的 origin，换域名部署不用改后台配置。
+ *
+ * `timeout` 的单位是**毫秒**（60 秒写作 60000），别和服务端「MCP 调用超时」混淆——
+ * 那一项在注册设置里配，单位是秒。客户端拿到的值偏小会先把请求掐断，宁可给足。
  */
 export const mcpConfigSnippet = (token: string, endpoint: string, origin: string) => {
   const url = `${origin.replace(/\/$/, "")}${endpoint}`;
@@ -166,7 +164,7 @@ export const mcpConfigSnippet = (token: string, endpoint: string, origin: string
           type: "http",
           url,
           headers: { Authorization: `Bearer ${token}` },
-          timeout: 60,
+          timeout: 60_000,
         },
       },
     },
