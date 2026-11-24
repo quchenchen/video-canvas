@@ -139,10 +139,9 @@ func New(mode, jwtSecret string, h Handlers) *gin.Engine {
 			mcpMe.POST("/projects", h.MCPMe.Create)
 			mcpMe.PUT("/projects/:id", h.MCPMe.Update)
 			mcpMe.DELETE("/projects/:id", h.MCPMe.Delete)
-			mcpMe.GET("/projects/:id/tokens", h.MCPMe.ListTokens)
-			mcpMe.POST("/projects/:id/tokens", h.MCPMe.IssueToken)
-			mcpMe.DELETE("/projects/:id/tokens/:tokenId", h.MCPMe.RevokeToken)
-			mcpMe.GET("/projects/:id/tokens/:tokenId/secret", h.MCPMe.TokenSecret)
+			// 一个项目只有一个接入、只有一枚令牌：生成/轮换是同一个动作，明文单独取
+			mcpMe.POST("/projects/:id/token", h.MCPMe.IssueToken)
+			mcpMe.GET("/projects/:id/token/secret", h.MCPMe.TokenSecret)
 		}
 
 		// 画布操作
@@ -432,10 +431,9 @@ func New(mode, jwtSecret string, h Handlers) *gin.Engine {
 			mcpAdmin.POST("/projects", h.AdminMCP.Create)
 			mcpAdmin.PUT("/projects/:id", h.AdminMCP.Update)
 			mcpAdmin.DELETE("/projects/:id", superOnly, h.AdminMCP.Delete)
-			mcpAdmin.GET("/projects/:id/tokens", h.AdminMCP.ListTokens)
-			mcpAdmin.POST("/projects/:id/tokens", h.AdminMCP.IssueToken)
-			mcpAdmin.DELETE("/projects/:id/tokens/:tokenId", h.AdminMCP.RevokeToken)
-			mcpAdmin.GET("/projects/:id/tokens/:tokenId/secret", h.AdminMCP.TokenSecret)
+			// 一个项目只有一个接入、只有一枚令牌：生成/轮换是同一个动作，明文单独取
+			mcpAdmin.POST("/projects/:id/token", h.AdminMCP.IssueToken)
+			mcpAdmin.GET("/projects/:id/token/secret", h.AdminMCP.TokenSecret)
 		}
 
 		// 存储配置（素材存到哪）：读 = admin 或 super_admin；测试 / 创建 / 修改 / 换密钥 / 设默认 / 删除 = 仅 super_admin。

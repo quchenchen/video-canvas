@@ -507,7 +507,9 @@ CREATE INDEX idx_mcp_project_tokens_project ON mcp_project_tokens (project_id);
 | 接口 | `POST /admin/mcp/projects` 与 `POST /me/mcp/projects` 的响应从项目变成 `{item, issued}`：项目 + 首枚令牌（明文、端点）。令牌名默认「接入令牌」，有效期取「注册设置」的默认值 |
 | 服务 | 抽出 `issue()`，`Create` 与 `IssueToken` 共用同一套签发规则；`Create` 里签发失败会 `DeleteProject` 回滚，不留连不上的空接入 |
 | 请求 | `MCPTokenIssueReq.name` 从 required 改为可空：留空由服务端用默认名，「重新生成」不再需要填表 |
-| 页面 | 删掉「令牌列表 + 签发表单」，项目展开就是「接入配置」：配置片段、令牌状态与到期、重新生成 |
+| 页面 | 删掉「令牌列表 + 签发表单」，项目展开就是「接入配置」：配置片段、令牌状态与到期、重新生成；表格也不再显示令牌数量 |
+| 路由 | 令牌从「集合」收成「项目的属性」：`POST /projects/:id/token`（生成或轮换）、`GET /projects/:id/token/secret`（取明文）；`GET/POST/DELETE /projects/:id/tokens/:tokenId` 全部去掉，注销随之下线（断开靠停用项目或重新生成） |
+| 列表 | 项目视图直接带 `token` 字段，仓储新增 `TokensByProjects` 批量取每个项目最新一枚，列表页一次请求就能渲染令牌状态 |
 | 删除 | `copy-secret-button.tsx` 不再有使用者，随面板一起删掉 |
 
 ### 取舍

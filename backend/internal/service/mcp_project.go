@@ -66,6 +66,8 @@ type MCPProjectStore interface {
 	TokenByHash(ctx context.Context, hash string) (*model.MCPProjectToken, error)
 	TokenByID(ctx context.Context, projectID, tokenID uint64) (*model.MCPProjectToken, error)
 	DeleteOtherTokens(ctx context.Context, projectID, keepID uint64) error
+	// TokensByProjects 一次取多个项目的令牌（每个项目最新一枚），列表页直接挂在项目上回显。
+	TokensByProjects(ctx context.Context, ids []uint64) (map[uint64]model.MCPProjectToken, error)
 	TouchToken(ctx context.Context, id uint64, at time.Time) error
 	TokenStats(ctx context.Context, ownerID uint64) (map[uint64]repository.MCPTokenStat, error)
 }
@@ -161,7 +163,11 @@ func (s *MCPProjectService) list(ctx context.Context, ownerID uint64) ([]*model.
 	if err != nil {
 		return nil, err
 	}
-	stats, err := s.d.Repo.TokenStats(ctx, ownerID)
+	projectIDs := make([]uint64, 0, len(projects))
+	for i := range projects {
+		projectIDs = append(projectIDs, projects[i].ID)
+	}
+	stamps, err := s.d.Repo.TokensByProjects(ctx, projectIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -188,9 +194,9 @@ func (s *MCPProjectService) list(ctx context.Context, ownerID uint64) ([]*model.
 		v := projectView(&projects[i])
 		v.OwnerName = names[projects[i].OwnerUserID]
 		v.CanvasTitle = titles[derefCanvasID(projects[i].CanvasID)]
-		if st, ok := stats[projects[i].ID]; ok {
-			v.TokenCount = st.Count
-			v.LastUsedAt = rfc3339Ptr(st.LastUsedAt)
+		if t, ok := stamps[projects[i].ID]; ok {
+			v.Token = tokenView(&t)
+			v.LastUsedAt = rfc3339Ptr(t.LastUsedAt)
 		}
 		out = append(out, v)
 	}
@@ -222,7 +228,7 @@ func (s *MCPProjectService) Create(ctx context.Context, adminID uint64, req *mod
 		_ = s.d.Repo.DeleteProject(ctx, p.ID)
 		return nil, err
 	}
-	v.TokenCount = 1
+	v.Token = issued.Item
 	return &model.MCPProjectCreated{Item: v, Issued: issued}, nil
 }
 
@@ -360,12 +366,15 @@ func (s *MCPProjectService) ListTokens(ctx context.Context, projectID uint64) ([
 	return out, nil
 }
 
-// IssueToken 签发令牌：明文只返回这一次，库里只存 sha256。
-func (s *MCPProjectService) IssueToken(ctx context.Context, adminID, projectID uint64, req *model.MCPTokenIssueReq) (*model.MCPIssuedToken, error) {
+// IssueToken 生成（或轮换）项目那枚令牌：明文只返回这一次，库里只存 sha256。
+//
+// 一个项目一枚令牌，所以不接收用途与天数：名字固定、有效期取后台默认，
+// 「重新生成」和「首次生成」是同一个动作。
+func (s *MCPProjectService) IssueToken(ctx context.Context, adminID, projectID uint64) (*model.MCPIssuedToken, error) {
 	if _, err := s.project(ctx, projectID); err != nil {
 		return nil, err
 	}
-	return s.issue(ctx, adminID, projectID, req.Name, req.Days)
+	return s.issue(ctx, adminID, projectID, defaultTokenName, 0)
 }
 
 // issue 生成并保存一枚令牌，同时清掉同项目的旧令牌：明文进密文、鉴权只用 sha256、写审计。
@@ -408,15 +417,26 @@ func (s *MCPProjectService) issue(ctx context.Context, actorID, projectID uint64
 	return &model.MCPIssuedToken{Item: tokenView(t), Token: plain, Endpoint: MCPEndpointPath}, nil
 }
 
-// RevokeToken 注销令牌；已注销的再注销是幂等的。
-func (s *MCPProjectService) RevokeToken(ctx context.Context, adminID, projectID, tokenID uint64) error {
-	if err := s.d.Repo.RevokeToken(ctx, projectID, tokenID, s.d.Now()); err != nil {
+// RevokeToken 注销项目那枚令牌：外部工具立刻断开，项目本身保留，之后可以再生成一枚。
+func (s *MCPProjectService) RevokeToken(ctx context.Context, adminID, projectID uint64) error {
+	if _, err := s.project(ctx, projectID); err != nil {
+		return err
+	}
+	tokens, err := s.d.Repo.ListTokens(ctx, projectID)
+	if err != nil {
+		return err
+	}
+	if len(tokens) == 0 {
+		return errcode.ErrMCPTokenNotFound
+	}
+	id := tokens[0].ID
+	if err := s.d.Repo.RevokeToken(ctx, projectID, id, s.d.Now()); err != nil {
 		if errors.Is(err, repository.ErrNotFound) {
 			return errcode.ErrMCPTokenNotFound
 		}
 		return err
 	}
-	s.audit(ctx, adminID, model.AdminAuditMCPTokenRevoke, tokenID, map[string]any{"project_id": projectID})
+	s.audit(ctx, adminID, model.AdminAuditMCPTokenRevoke, id, map[string]any{"project_id": projectID})
 	return nil
 }
 

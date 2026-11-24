@@ -23,14 +23,10 @@ type MCPSelfAPI interface {
 	OwnedUpdate(ctx context.Context, ownerID, projectID uint64, req *model.MCPProjectReq) (*model.MCPProjectView, error)
 	// OwnedDelete 删自己的项目与它的令牌。
 	OwnedDelete(ctx context.Context, ownerID, projectID uint64) error
-	// OwnedListTokens 列自己项目的令牌（不含明文）。
-	OwnedListTokens(ctx context.Context, ownerID, projectID uint64) ([]*model.MCPTokenView, error)
-	// OwnedIssueToken 给自己项目签发令牌，明文只返回这一次。
-	OwnedIssueToken(ctx context.Context, ownerID, projectID uint64, req *model.MCPTokenIssueReq) (*model.MCPIssuedToken, error)
-	// OwnedRevokeToken 注销自己项目的令牌。
-	OwnedRevokeToken(ctx context.Context, ownerID, projectID, tokenID uint64) error
-	// OwnedTokenSecret 取回自己项目令牌的明文（列表里「复制」用）。
-	OwnedTokenSecret(ctx context.Context, ownerID, projectID, tokenID uint64) (string, error)
+	// OwnedIssueToken 给自己项目生成（或轮换）那枚令牌，明文只返回这一次。
+	OwnedIssueToken(ctx context.Context, ownerID, projectID uint64) (*model.MCPIssuedToken, error)
+	// OwnedTokenSecret 取回自己项目那枚令牌的明文。
+	OwnedTokenSecret(ctx context.Context, ownerID, projectID uint64) (string, error)
 }
 
 // MCPSelfHandler 是「我的 MCP 接入」接口：挂在登录态下，只操作当前用户自己的数据。
@@ -96,31 +92,13 @@ func (h *MCPSelfHandler) Delete(c *gin.Context) {
 	response.OK(c, nil)
 }
 
-// ListTokens 列出自己项目的令牌。
-func (h *MCPSelfHandler) ListTokens(c *gin.Context) {
-	id, ok := pathID(c)
-	if !ok {
-		return
-	}
-	items, err := h.svc.OwnedListTokens(c.Request.Context(), selfUserID(c), id)
-	if err != nil {
-		response.Fail(c, err)
-		return
-	}
-	response.OK(c, gin.H{"items": items})
-}
-
-// IssueToken 给自己的项目签发令牌；明文只在这个响应里出现一次。
+// IssueToken 给自己项目生成（或轮换）那枚令牌：一个项目一枚，明文只在这个响应里出现一次。
 func (h *MCPSelfHandler) IssueToken(c *gin.Context) {
 	id, ok := pathID(c)
 	if !ok {
 		return
 	}
-	var req model.MCPTokenIssueReq
-	if !BindJSON(c, &req) {
-		return
-	}
-	v, err := h.svc.OwnedIssueToken(c.Request.Context(), selfUserID(c), id, &req)
+	v, err := h.svc.OwnedIssueToken(c.Request.Context(), selfUserID(c), id)
 	if err != nil {
 		response.Fail(c, err)
 		return
@@ -128,34 +106,13 @@ func (h *MCPSelfHandler) IssueToken(c *gin.Context) {
 	response.OK(c, v)
 }
 
-// RevokeToken 注销自己项目的令牌。
-func (h *MCPSelfHandler) RevokeToken(c *gin.Context) {
-	id, ok := pathID(c)
-	if !ok {
-		return
-	}
-	tokenID, ok := tokenPathID(c)
-	if !ok {
-		return
-	}
-	if err := h.svc.OwnedRevokeToken(c.Request.Context(), selfUserID(c), id, tokenID); err != nil {
-		response.Fail(c, err)
-		return
-	}
-	response.OK(c, nil)
-}
-
-// TokenSecret 取回自己项目里某枚令牌的明文。
+// TokenSecret 取回自己项目那枚令牌的明文。
 func (h *MCPSelfHandler) TokenSecret(c *gin.Context) {
 	id, ok := pathID(c)
 	if !ok {
 		return
 	}
-	tokenID, ok := tokenPathID(c)
-	if !ok {
-		return
-	}
-	token, err := h.svc.OwnedTokenSecret(c.Request.Context(), selfUserID(c), id, tokenID)
+	token, err := h.svc.OwnedTokenSecret(c.Request.Context(), selfUserID(c), id)
 	if err != nil {
 		response.Fail(c, err)
 		return

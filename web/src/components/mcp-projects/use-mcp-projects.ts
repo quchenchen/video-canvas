@@ -6,26 +6,17 @@ import {
   getMCPTokenSecret,
   issueMCPToken,
   listMCPProjects,
-  listMCPTokens,
   removeMCPProject,
-  revokeMCPToken,
   updateMCPProject,
 } from "@/api/admin/mcp-project";
-import type {
-  IssuedMCPToken,
-  MCPProjectItem,
-  MCPProjectReq,
-  MCPTokenItem,
-} from "@/api/admin/mcp-project/type";
+import type { IssuedMCPToken, MCPProjectItem, MCPProjectReq } from "@/api/admin/mcp-project/type";
 import { expandMCPScopes } from "@/utils/admin/mcp-project";
 import {
   createMyMCPProject,
   getMyMCPTokenSecret,
   issueMyMCPToken,
   listMyMCPProjects,
-  listMyMCPTokens,
   removeMyMCPProject,
-  revokeMyMCPToken,
   updateMyMCPProject,
 } from "@/api/mcp";
 
@@ -42,9 +33,7 @@ const APIS = {
     create: createMCPProject,
     update: updateMCPProject,
     remove: removeMCPProject,
-    tokens: listMCPTokens,
     issue: issueMCPToken,
-    revoke: revokeMCPToken,
     secret: getMCPTokenSecret,
   },
   self: {
@@ -52,9 +41,7 @@ const APIS = {
     create: createMyMCPProject,
     update: updateMyMCPProject,
     remove: removeMyMCPProject,
-    tokens: listMyMCPTokens,
     issue: issueMyMCPToken,
-    revoke: revokeMyMCPToken,
     secret: getMyMCPTokenSecret,
   },
 } as const;
@@ -93,8 +80,6 @@ export function useMCPProjects(audience: MCPProjectsAudience = "admin") {
   const [busy, setBusy] = useState(false);
   // 当前展开配置的项目 id
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [tokens, setTokens] = useState<MCPTokenItem[]>([]);
-  const [tokensLoading, setTokensLoading] = useState(false);
   // 刚签发（含新建项目时自动签发）的令牌：明文只在这一份状态里存在
   const [issued, setIssued] = useState<IssuedMCPToken | null>(null);
 
@@ -123,35 +108,11 @@ export function useMCPProjects(audience: MCPProjectsAudience = "admin") {
     void reload();
   }, [reload]);
 
-  /** 拉某个项目的令牌列表。 */
-  const loadTokens = useCallback(
-    async (projectId: string) => {
-      setTokensLoading(true);
-      try {
-        setTokens(await api.tokens(projectId));
-      } catch {
-        toast.error("令牌列表加载失败");
-      } finally {
-        setTokensLoading(false);
-      }
-    },
-    [api],
-  );
-
-  /** 展开 / 收起令牌面板；展开时清掉上一次的明文。 */
-  const toggleTokens = useCallback(
-    (projectId: string) => {
-      setIssued(null);
-      if (selectedId === projectId) {
-        setSelectedId(null);
-        setTokens([]);
-        return;
-      }
-      setSelectedId(projectId);
-      void loadTokens(projectId);
-    },
-    [loadTokens, selectedId],
-  );
+  /** 展开 / 收起某个项目的接入配置；展开时清掉上一次的明文。 */
+  const toggleTokens = useCallback((projectId: string) => {
+    setIssued(null);
+    setSelectedId((cur) => (cur === projectId ? null : projectId));
+  }, []);
 
   /** 把项目字段转成请求体：归属用户与画布只在填了的时候才带，后端按「算自己名下 / 沿用原归属」处理。 */
   const toReq = useCallback(
@@ -182,7 +143,6 @@ export function useMCPProjects(audience: MCPProjectsAudience = "admin") {
         setSelectedId(created.item.id);
         toast.success("项目已创建，下面的配置可以直接复制");
         await reload();
-        await loadTokens(created.item.id);
         return true;
       } catch {
         toast.error("创建失败");
@@ -191,7 +151,7 @@ export function useMCPProjects(audience: MCPProjectsAudience = "admin") {
         setBusy(false);
       }
     },
-    [api, loadTokens, reload, toReq],
+    [api, reload, toReq],
   );
 
   /** 修改项目（名称、画布、权限）。 */
@@ -244,7 +204,6 @@ export function useMCPProjects(audience: MCPProjectsAudience = "admin") {
         toast.success(`「${item.name}」已删除`);
         if (selectedId === item.id) {
           setSelectedId(null);
-          setTokens([]);
           setIssued(null);
         }
         await refresh();
@@ -265,9 +224,8 @@ export function useMCPProjects(audience: MCPProjectsAudience = "admin") {
     async (projectId: string) => {
       setBusy(true);
       try {
-        const out = await api.issue(projectId, {});
+        const out = await api.issue(projectId);
         setIssued(out);
-        await loadTokens(projectId);
         await refresh();
         toast.success("新令牌已生成，旧令牌立刻失效");
       } catch {
@@ -276,32 +234,11 @@ export function useMCPProjects(audience: MCPProjectsAudience = "admin") {
         setBusy(false);
       }
     },
-    [api, loadTokens, refresh],
+    [api, refresh],
   );
 
-  /** 注销令牌。 */
-  const revoke = useCallback(
-    async (projectId: string, token: MCPTokenItem) => {
-      setBusy(true);
-      try {
-        await api.revoke(projectId, token.id);
-        toast.success("令牌已注销，立刻失效");
-        await loadTokens(projectId);
-        await refresh();
-      } catch {
-        toast.error("注销失败");
-      } finally {
-        setBusy(false);
-      }
-    },
-    [api, loadTokens, refresh],
-  );
-
-  /** 取回某枚令牌的明文：列表里「复制」用，明文不进页面状态。 */
-  const tokenSecret = useCallback(
-    (projectId: string, token: MCPTokenItem) => api.secret(projectId, token.id),
-    [api],
-  );
+  /** 取回项目那枚令牌的明文：「显示配置片段」用，明文不进页面状态。 */
+  const tokenSecret = useCallback((projectId: string) => api.secret(projectId), [api]);
 
   /** 清掉刚签发的明文（用户点「我已复制」之后）。 */
   const clearIssued = useCallback(() => setIssued(null), []);
@@ -311,8 +248,6 @@ export function useMCPProjects(audience: MCPProjectsAudience = "admin") {
     loading,
     busy,
     selectedId,
-    tokens,
-    tokensLoading,
     issued,
     refresh,
     toggleTokens,
@@ -321,7 +256,6 @@ export function useMCPProjects(audience: MCPProjectsAudience = "admin") {
     setEnabled,
     remove,
     rotate,
-    revoke,
     tokenSecret,
     clearIssued,
   };

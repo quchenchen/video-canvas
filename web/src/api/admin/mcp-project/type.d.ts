@@ -16,8 +16,11 @@ export interface MCPProjectItem {
   canvas_title?: string;
   /** 是否启用：停用后该项目全部令牌立刻失效 */
   enabled: boolean;
-  /** 有效令牌数量（不含已注销） */
-  token_count: number;
+  /**
+   * 这个项目唯一的一枚令牌；还没生成过（老数据）就是空。
+   * 一个项目一个接入，不存在「多枚令牌」的列表。
+   */
+  token?: MCPTokenItem;
   /** 最近一次调用的时间，从未使用为 null */
   last_used_at?: string;
   created_at: string;
@@ -55,11 +58,6 @@ export interface MCPTokenItem {
   last_used_at?: string;
   revoked_at?: string;
   created_at: string;
-}
-
-/** 令牌列表 */
-export interface MCPTokenList {
-  items: MCPTokenItem[];
 }
 
 /** 签发令牌 */

@@ -3,13 +3,11 @@ package service
 import (
 	"context"
 	"encoding/base64"
-	"errors"
 	"strconv"
 	"strings"
 
 	"video-canvas/internal/pkg/errcode"
 	"video-canvas/internal/pkg/logger"
-	"video-canvas/internal/repository"
 
 	"go.uber.org/zap"
 )
@@ -78,41 +76,44 @@ func (s *MCPProjectService) tokenDays(ctx context.Context, days int) (int, error
 	return n, nil
 }
 
-// TokenSecret 取回一枚令牌的明文（后台代管：能读全部项目）。
+// TokenSecret 取回这个项目那枚令牌的明文（后台代管：能读全部项目）。
 //
+// 一个项目只有一枚令牌，所以不再按令牌 id 取：调用方只需要说清是哪个项目。
 // 只对「未注销、未过期」的令牌返回：失效的令牌就算取出明文也没有任何用处，
-// 反而容易让人以为它还能用。老令牌没有密文时明确让用户重新签发。
-func (s *MCPProjectService) TokenSecret(ctx context.Context, callerID, projectID, tokenID uint64) (string, error) {
+// 反而容易让人以为它还能用。老令牌没有密文时明确让用户重新生成。
+func (s *MCPProjectService) TokenSecret(ctx context.Context, callerID, projectID uint64) (string, error) {
 	if _, err := s.project(ctx, projectID); err != nil {
 		return "", err
 	}
-	return s.tokenSecret(ctx, callerID, projectID, tokenID)
+	return s.projectTokenSecret(ctx, callerID, projectID)
 }
 
-// OwnedTokenSecret 取回自己项目里某枚令牌的明文。
-func (s *MCPProjectService) OwnedTokenSecret(ctx context.Context, ownerID, projectID, tokenID uint64) (string, error) {
+// OwnedTokenSecret 取回自己项目那枚令牌的明文。
+func (s *MCPProjectService) OwnedTokenSecret(ctx context.Context, ownerID, projectID uint64) (string, error) {
 	if _, err := s.ownedProject(ctx, ownerID, projectID); err != nil {
 		return "", err
 	}
-	return s.tokenSecret(ctx, ownerID, projectID, tokenID)
+	return s.projectTokenSecret(ctx, ownerID, projectID)
 }
 
-func (s *MCPProjectService) tokenSecret(ctx context.Context, callerID, projectID, tokenID uint64) (string, error) {
-	t, err := s.d.Repo.TokenByID(ctx, projectID, tokenID)
+// projectTokenSecret 取项目唯一令牌的明文；老数据里万一有多条，按 id 取最新一条。
+func (s *MCPProjectService) projectTokenSecret(ctx context.Context, callerID, projectID uint64) (string, error) {
+	tokens, err := s.d.Repo.ListTokens(ctx, projectID)
 	if err != nil {
-		if errors.Is(err, repository.ErrNotFound) {
-			return "", errcode.ErrMCPTokenNotFound
-		}
 		return "", err
 	}
+	if len(tokens) == 0 {
+		return "", errcode.ErrMCPTokenNotFound
+	}
+	t := &tokens[0]
 	if t.RevokedAt != nil {
-		return "", errcode.ErrInvalidParams.WithMsg("这枚令牌已注销，不能复制；需要就重新签发一枚")
+		return "", errcode.ErrInvalidParams.WithMsg("这枚令牌已注销，不能复制；重新生成一枚即可")
 	}
 	if !t.ExpiresAt.After(s.d.Now()) {
-		return "", errcode.ErrInvalidParams.WithMsg("这枚令牌已过期，不能复制；需要就重新签发一枚")
+		return "", errcode.ErrInvalidParams.WithMsg("这枚令牌已过期，不能复制；重新生成一枚即可")
 	}
 	if t.SecretCipher == "" {
-		return "", errcode.ErrInvalidParams.WithMsg("这枚令牌是早期签发的，当时没有保存明文，只能重新签发")
+		return "", errcode.ErrInvalidParams.WithMsg("这枚令牌是早期生成的，当时没有保存明文，只能重新生成")
 	}
 	plain, err := s.openToken(t.SecretCipher, t.TokenHash)
 	if err != nil {
@@ -120,7 +121,8 @@ func (s *MCPProjectService) tokenSecret(ctx context.Context, callerID, projectID
 	}
 	// 复制等同于持有人重新拿到凭证：留一条日志，事后能查是谁取的
 	logger.Info("取回 MCP 令牌明文",
-		zap.Uint64("caller_id", callerID), zap.Uint64("project_id", projectID), zap.String("token_id", strconv.FormatUint(tokenID, 10)))
+		zap.Uint64("caller_id", callerID), zap.Uint64("project_id", projectID),
+		zap.String("token_id", strconv.FormatUint(t.ID, 10)))
 	return plain, nil
 }
 

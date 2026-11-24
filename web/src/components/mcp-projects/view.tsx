@@ -71,7 +71,6 @@ function ProjectTable({
         <TableRow className="bg-muted/40 hover:bg-muted/40">
           <TableHead className="px-4">名称</TableHead>
           <TableHead>能力</TableHead>
-          <TableHead>令牌</TableHead>
           <TableHead>最近使用</TableHead>
           <TableHead>状态</TableHead>
           <TableHead className="w-40 px-4 text-right">操作</TableHead>
@@ -108,7 +107,6 @@ function ProjectTable({
                 )}
               </div>
             </TableCell>
-            <TableCell className="py-3 tabular-nums">{item.token_count}</TableCell>
             <TableCell className="text-muted-foreground py-3 tabular-nums">
               {formatMCPTime(item.last_used_at)}
             </TableCell>
@@ -178,7 +176,7 @@ function AccessPanel({
   project: MCPProjectItem;
   now: number;
 }) {
-  const token = state.tokens[0] ?? null;
+  const token = project.token ?? null;
   const issuedHere =
     state.issued && state.issued.item.project_id === project.id ? state.issued : null;
   const [revealed, setRevealed] = useState<string | null>(null);
@@ -195,7 +193,7 @@ function AccessPanel({
     setFetching(true);
     setFailed(false);
     try {
-      setRevealed(await state.tokenSecret(project.id, token));
+      setRevealed(await state.tokenSecret(project.id));
     } catch {
       setFailed(true);
     } finally {

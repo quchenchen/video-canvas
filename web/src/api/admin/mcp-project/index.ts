@@ -2,14 +2,11 @@ import service from "@/utils/requests/service";
 
 import { adminMCPProjectEndpoints as ep } from "./endpoints";
 import type {
-  IssueMCPTokenReq,
   IssuedMCPToken,
   MCPProjectCreated,
   MCPProjectItem,
   MCPProjectList,
   MCPProjectReq,
-  MCPTokenItem,
-  MCPTokenList,
 } from "./type";
 
 /**
@@ -42,34 +39,16 @@ export const updateMCPProject = (id: string, data: MCPProjectReq) =>
 export const removeMCPProject = (id: string) => service.delete<void>(ep.remove(id));
 
 /**
- * 项目令牌列表
+ * 生成或轮换项目那枚令牌：一个项目只有一枚，旧的立刻失效。
+ * 明文只在这条响应里返回，展示后不要再保存。
  * @param id 项目 ID
- * @returns 该项目的令牌，新的在前
  */
-export const listMCPTokens = async (id: string): Promise<MCPTokenItem[]> =>
-  ((await service.get<MCPTokenList | null>(ep.tokens(id), undefined)) ?? { items: [] }).items ?? [];
+export const issueMCPToken = (id: string) => service.post<IssuedMCPToken>(ep.issueToken(id));
 
 /**
- * 签发令牌。明文只在这次响应里返回，展示后不要再保存
+ * 取回项目那枚令牌的明文：「显示配置片段」用。
+ * 只对未过期、当初存了密文的令牌有效。
  * @param id 项目 ID
- * @param data 用途（1–64 字）与有效天数（1–90）
  */
-export const issueMCPToken = (id: string, data: IssueMCPTokenReq) =>
-  service.post<IssuedMCPToken>(ep.issueToken(id), data);
-
-/**
- * 取回令牌明文：列表里「复制」用。只对未注销、未过期、当初存了密文的令牌有效
- * @param id 项目 ID
- * @param tokenId 令牌 ID
- */
-export const getMCPTokenSecret = async (id: string, tokenId: string): Promise<string> =>
-  (await service.get<{ token: string } | null>(ep.tokenSecret(id, tokenId), undefined))?.token ??
-  "";
-
-/**
- * 注销令牌：立即失效，不可恢复
- * @param id 项目 ID
- * @param tokenId 令牌 ID
- */
-export const revokeMCPToken = (id: string, tokenId: string) =>
-  service.delete<void>(ep.revokeToken(id, tokenId));
+export const getMCPTokenSecret = async (id: string): Promise<string> =>
+  (await service.get<{ token: string } | null>(ep.tokenSecret(id), undefined))?.token ?? "";

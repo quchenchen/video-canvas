@@ -103,6 +103,24 @@ func (s *mcpStore) ListTokens(_ context.Context, projectID uint64) ([]model.MCPP
 	return out, nil
 }
 
+// TokensByProjects 每个项目取 id 最大的一枚，和生产那条 DISTINCT ON 查询同口径。
+func (s *mcpStore) TokensByProjects(_ context.Context, ids []uint64) (map[uint64]model.MCPProjectToken, error) {
+	out := make(map[uint64]model.MCPProjectToken, len(ids))
+	for _, id := range ids {
+		var latest model.MCPProjectToken
+		found := false
+		for _, t := range s.tokens {
+			if t.ProjectID == id && (!found || t.ID > latest.ID) {
+				latest, found = t, true
+			}
+		}
+		if found {
+			out[id] = latest
+		}
+	}
+	return out, nil
+}
+
 func (s *mcpStore) RevokeToken(_ context.Context, projectID, tokenID uint64, at time.Time) error {
 	for i := range s.tokens {
 		if s.tokens[i].ID == tokenID && s.tokens[i].ProjectID == projectID {
@@ -257,7 +275,7 @@ func (f *mcpFixture) create(t *testing.T) *model.MCPProjectView {
 // issue 给项目签一个令牌并返回明文。
 func (f *mcpFixture) issue(t *testing.T, projectID string) string {
 	t.Helper()
-	out, err := f.svc.IssueToken(context.Background(), 9, mustID(t, projectID), &model.MCPTokenIssueReq{Name: "本机", Days: 30})
+	out, err := f.svc.IssueToken(context.Background(), 9, mustID(t, projectID))
 	if err != nil {
 		t.Fatalf("签令牌失败：%v", err)
 	}
@@ -298,7 +316,7 @@ func TestMCPTokenLifecycle(t *testing.T) {
 	if err != nil || len(tokens) != 1 {
 		t.Fatalf("令牌列表不对：%v %v", tokens, err)
 	}
-	if err := f.svc.RevokeToken(context.Background(), 9, mustID(t, project.ID), mustID(t, tokens[0].ID)); err != nil {
+	if err := f.svc.RevokeToken(context.Background(), 9, mustID(t, project.ID)); err != nil {
 		t.Fatalf("注销失败：%v", err)
 	}
 	if _, err := f.svc.Authenticate(context.Background(), plain); !isCode(err, errcode.ErrMCPTokenInvalid) {
@@ -340,24 +358,24 @@ func TestMCPTokenRotatesAndSecretCopyable(t *testing.T) {
 	if !tokens[0].HasSecret {
 		t.Fatal("签发时应该存下密文，界面的「复制」才有东西可取")
 	}
-	got, err := f.svc.TokenSecret(context.Background(), 9, mustID(t, project.ID), mustID(t, tokens[0].ID))
+	got, err := f.svc.TokenSecret(context.Background(), 9, mustID(t, project.ID))
 	if err != nil || got != second {
 		t.Fatalf("取回明文应等于签发时的那串：%q %v", got, err)
 	}
 
 	// 老令牌（没有密文）只能重新签发，不能假装能复制
 	f.store.tokens[0].SecretCipher = ""
-	if _, err := f.svc.TokenSecret(context.Background(), 9, mustID(t, project.ID), mustID(t, tokens[0].ID)); err == nil {
+	if _, err := f.svc.TokenSecret(context.Background(), 9, mustID(t, project.ID)); err == nil {
 		t.Fatal("没有密文的令牌应该拒绝复制")
 	}
 }
 
-// TestMCPTokenDaysFallBackToDefault 签发表单不填有效期时（Days 留 0）用后台配置的默认值，
-// 后台没配或配坏了就退到内置 30 天。线上就是这样：前端留空 → 请求体没有 days 字段。
+// TestMCPTokenDaysFallBackToDefault 生成令牌时用后台配置的默认有效期；
+// 后台没配或配坏了就退到内置 30 天。对外不再接收天数，所以只保留默认值这一条路。
 func TestMCPTokenDaysFallBackToDefault(t *testing.T) {
 	f := newMCPFixture(t)
 	project := f.create(t)
-	issue := func(days int, defaults *mcpDefaults) time.Time {
+	issue := func(defaults *mcpDefaults) time.Time {
 		t.Helper()
 		deps := service.MCPProjectDeps{
 			Repo: f.store, Users: f.users, Canvases: f.canvases, Now: func() time.Time { return f.now },
@@ -366,9 +384,9 @@ func TestMCPTokenDaysFallBackToDefault(t *testing.T) {
 			deps.Defaults = *defaults
 		}
 		f.svc = service.NewMCPProjectService(deps)
-		out, err := f.svc.IssueToken(context.Background(), 9, mustID(t, project.ID), &model.MCPTokenIssueReq{Name: "留空", Days: days})
+		out, err := f.svc.IssueToken(context.Background(), 9, mustID(t, project.ID))
 		if err != nil {
-			t.Fatalf("有效期 %d 应该能签发：%v", days, err)
+			t.Fatalf("生成令牌不该失败：%v", err)
 		}
 		got, perr := time.Parse(time.RFC3339, out.Item.ExpiresAt)
 		if perr != nil {
@@ -378,24 +396,13 @@ func TestMCPTokenDaysFallBackToDefault(t *testing.T) {
 	}
 
 	// 1. 没接默认值来源时退到 30 天
-	if got, want := issue(0, nil), f.now.AddDate(0, 0, 30); !got.Equal(want) {
+	if got, want := issue(nil), f.now.AddDate(0, 0, 30); !got.Equal(want) {
 		t.Fatalf("默认应该是 30 天，得到 %s", got)
 	}
 	// 2. 接了默认值来源就用库里的值
 	d := mcpDefaults(7)
-	if got, want := issue(0, &d), f.now.AddDate(0, 0, 7); !got.Equal(want) {
+	if got, want := issue(&d), f.now.AddDate(0, 0, 7); !got.Equal(want) {
 		t.Fatalf("应该用库里的 7 天，得到 %s", got)
-	}
-	// 3. 显式填了就越过默认值
-	if got, want := issue(45, &d), f.now.AddDate(0, 0, 45); !got.Equal(want) {
-		t.Fatalf("应该用填的 45 天，得到 %s", got)
-	}
-	// 4. 超过 90 天仍然拒
-	f.svc = service.NewMCPProjectService(service.MCPProjectDeps{
-		Repo: f.store, Users: f.users, Canvases: f.canvases, Now: func() time.Time { return f.now },
-	})
-	if _, err := f.svc.IssueToken(context.Background(), 9, mustID(t, project.ID), &model.MCPTokenIssueReq{Name: "太长", Days: 91}); !isCode(err, errcode.ErrInvalidParams) {
-		t.Fatalf("超过 90 天应该拒，得到 %v", err)
 	}
 }
 
@@ -530,7 +537,7 @@ func TestMCPOwnedProjectsAreIsolated(t *testing.T) {
 	if _, err := f.svc.OwnedListTokens(context.Background(), 9, projectID); !isCode(err, errcode.ErrMCPProjectNotFound) {
 		t.Fatalf("看别人的令牌应该拒绝，得到 %v", err)
 	}
-	if _, err := f.svc.OwnedIssueToken(context.Background(), 9, projectID, &model.MCPTokenIssueReq{Name: "偷签", Days: 30}); !isCode(err, errcode.ErrMCPProjectNotFound) {
+	if _, err := f.svc.OwnedIssueToken(context.Background(), 9, projectID); !isCode(err, errcode.ErrMCPProjectNotFound) {
 		t.Fatalf("给别人项目签令牌应该拒绝，得到 %v", err)
 	}
 	if err := f.svc.OwnedDelete(context.Background(), 9, projectID); !isCode(err, errcode.ErrMCPProjectNotFound) {
@@ -538,7 +545,7 @@ func TestMCPOwnedProjectsAreIsolated(t *testing.T) {
 	}
 
 	// 本人操作正常
-	out, err := f.svc.OwnedIssueToken(context.Background(), 7, projectID, &model.MCPTokenIssueReq{Name: "本机", Days: 30})
+	out, err := f.svc.OwnedIssueToken(context.Background(), 7, projectID)
 	if err != nil {
 		t.Fatalf("本人签令牌失败：%v", err)
 	}

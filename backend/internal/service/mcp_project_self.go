@@ -54,20 +54,20 @@ func (s *MCPProjectService) OwnedListTokens(ctx context.Context, ownerID, projec
 	return s.ListTokens(ctx, projectID)
 }
 
-// OwnedIssueToken 给自己项目签发令牌。
-func (s *MCPProjectService) OwnedIssueToken(ctx context.Context, ownerID, projectID uint64, req *model.MCPTokenIssueReq) (*model.MCPIssuedToken, error) {
+// OwnedIssueToken 给自己项目生成（或轮换）那枚令牌。
+func (s *MCPProjectService) OwnedIssueToken(ctx context.Context, ownerID, projectID uint64) (*model.MCPIssuedToken, error) {
 	if _, err := s.ownedProject(ctx, ownerID, projectID); err != nil {
 		return nil, err
 	}
-	return s.IssueToken(ctx, ownerID, projectID, req)
+	return s.IssueToken(ctx, ownerID, projectID)
 }
 
-// OwnedRevokeToken 注销自己项目的令牌。
-func (s *MCPProjectService) OwnedRevokeToken(ctx context.Context, ownerID, projectID, tokenID uint64) error {
+// OwnedRevokeToken 注销自己项目那枚令牌。
+func (s *MCPProjectService) OwnedRevokeToken(ctx context.Context, ownerID, projectID uint64) error {
 	if _, err := s.ownedProject(ctx, ownerID, projectID); err != nil {
 		return err
 	}
-	return s.RevokeToken(ctx, ownerID, projectID, tokenID)
+	return s.RevokeToken(ctx, ownerID, projectID)
 }
 
 // ownedProject 读项目并确认归这个用户所有。

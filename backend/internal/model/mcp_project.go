@@ -186,13 +186,15 @@ type MCPProjectView struct {
 	OwnerName   string   `json:"owner_name,omitempty"`
 	Scopes      []string `json:"scopes"`
 	// CanvasCode 是默认画布地址里的那串十六进制 id；没设默认画布时为空。
-	CanvasCode  string  `json:"canvas_code,omitempty"`
-	CanvasTitle string  `json:"canvas_title,omitempty"`
-	Enabled     bool    `json:"enabled"`
-	TokenCount  int     `json:"token_count"`
-	LastUsedAt  *string `json:"last_used_at,omitempty"`
-	CreatedAt   string  `json:"created_at"`
-	UpdatedAt   string  `json:"updated_at"`
+	CanvasCode  string `json:"canvas_code,omitempty"`
+	CanvasTitle string `json:"canvas_title,omitempty"`
+	Enabled     bool   `json:"enabled"`
+	// Token 是这个项目唯一的一枚令牌：一个项目就是一个接入，不存在「令牌列表」。
+	// 还没生成过（老数据）时为 nil，界面据此提示「生成令牌」。
+	Token      *MCPTokenView `json:"token,omitempty"`
+	LastUsedAt *string       `json:"last_used_at,omitempty"`
+	CreatedAt  string        `json:"created_at"`
+	UpdatedAt  string        `json:"updated_at"`
 }
 
 // MCPTokenView 是令牌列表项：只给前 8 位，拿不到明文。
