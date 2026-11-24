@@ -218,3 +218,25 @@ func (r *MCPRepository) CanvasTitles(ctx context.Context, ids []uint64) (map[uin
 	}
 	return out, nil
 }
+
+// TokensByProjects 一次取多个项目的令牌，每个项目只取最新一枚。
+//
+// 一个项目就是一个接入，列表页把令牌状态直接挂在项目上，不再单独请求「令牌列表」。
+func (r *MCPRepository) TokensByProjects(ctx context.Context, ids []uint64) (map[uint64]model.MCPProjectToken, error) {
+	out := make(map[uint64]model.MCPProjectToken, len(ids))
+	if len(ids) == 0 {
+		return out, nil
+	}
+	var rows []model.MCPProjectToken
+	err := r.db.WithContext(ctx).
+		Raw(`SELECT DISTINCT ON (project_id) * FROM mcp_project_tokens
+			WHERE project_id IN ? ORDER BY project_id, id DESC`, ids).
+		Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	for _, t := range rows {
+		out[t.ProjectID] = t
+	}
+	return out, nil
+}

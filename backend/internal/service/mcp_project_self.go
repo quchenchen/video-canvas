@@ -13,8 +13,9 @@ import (
 // 下面这组方法给「我的 MCP 接入」用：任何登录用户都能给自己开接入，不必等管理员。
 // 与上面的管理端方法的区别只有两点：归属用户固定为调用者本人，且每个方法都先确认项目确实属于他。
 
-// OwnedCreate 用户自助建项目：归属固定为本人，请求体里的 owner_user_id 一律忽略。
-func (s *MCPProjectService) OwnedCreate(ctx context.Context, ownerID uint64, req *model.MCPProjectReq) (*model.MCPProjectView, error) {
+// OwnedCreate 用户自助建项目：归属固定为本人，请求体里的 owner_user_id 一律忽略；
+// 返回项目与首枚令牌（明文只在这一次响应里出现）。
+func (s *MCPProjectService) OwnedCreate(ctx context.Context, ownerID uint64, req *model.MCPProjectReq) (*model.MCPProjectCreated, error) {
 	n, err := s.d.Repo.CountProjectsByOwner(ctx, ownerID)
 	if err != nil {
 		return nil, err
@@ -53,20 +54,20 @@ func (s *MCPProjectService) OwnedListTokens(ctx context.Context, ownerID, projec
 	return s.ListTokens(ctx, projectID)
 }
 
-// OwnedIssueToken 给自己项目签发令牌。
-func (s *MCPProjectService) OwnedIssueToken(ctx context.Context, ownerID, projectID uint64, req *model.MCPTokenIssueReq) (*model.MCPIssuedToken, error) {
+// OwnedIssueToken 给自己项目生成（或轮换）那枚令牌。
+func (s *MCPProjectService) OwnedIssueToken(ctx context.Context, ownerID, projectID uint64) (*model.MCPIssuedToken, error) {
 	if _, err := s.ownedProject(ctx, ownerID, projectID); err != nil {
 		return nil, err
 	}
-	return s.IssueToken(ctx, ownerID, projectID, req)
+	return s.IssueToken(ctx, ownerID, projectID)
 }
 
-// OwnedRevokeToken 注销自己项目的令牌。
-func (s *MCPProjectService) OwnedRevokeToken(ctx context.Context, ownerID, projectID, tokenID uint64) error {
+// OwnedRevokeToken 注销自己项目那枚令牌。
+func (s *MCPProjectService) OwnedRevokeToken(ctx context.Context, ownerID, projectID uint64) error {
 	if _, err := s.ownedProject(ctx, ownerID, projectID); err != nil {
 		return err
 	}
-	return s.RevokeToken(ctx, ownerID, projectID, tokenID)
+	return s.RevokeToken(ctx, ownerID, projectID)
 }
 
 // ownedProject 读项目并确认归这个用户所有。

@@ -1,4 +1,3 @@
-import type { FormEvent } from "react";
 import { useState } from "react";
 import { Cable, KeyRound, Plus } from "lucide-react";
 
@@ -13,7 +12,6 @@ import {
 import { CopyButton } from "@/components/admin-ui/copy-button";
 import { DataPage, DataPanel, DataPanelBody } from "@/components/admin-ui/data-panel";
 import { EmptyState, EmptyStateIcon, EmptyStateTitle } from "@/components/admin-ui/empty-state";
-import { FormField } from "@/components/admin-ui/form-field";
 import { Notice } from "@/components/admin-ui/notice";
 import {
   PageHeader,
@@ -22,17 +20,8 @@ import {
   PageHeaderTitle,
 } from "@/components/admin-ui/page-header";
 import { RowAction } from "@/components/admin-ui/row-action";
-import {
-  SecretReveal,
-  SecretRevealActions,
-  SecretRevealCode,
-  SecretRevealHint,
-  SecretRevealTitle,
-  SecretRevealValue,
-} from "@/components/admin-ui/secret-reveal";
 import { Tag } from "@/components/admin-ui/tag";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import {
   Table,
   TableBody,
@@ -50,7 +39,6 @@ import {
 } from "@/utils/admin/mcp-project";
 import { useNow } from "@/hooks/use-now";
 
-import { CopySecretButton } from "./copy-secret-button";
 import { ProjectDialog, type ProjectDialogTarget } from "./project-dialog";
 import type { MCPProjectsAudience, MCPProjectsState } from "./use-mcp-projects";
 
@@ -83,7 +71,6 @@ function ProjectTable({
         <TableRow className="bg-muted/40 hover:bg-muted/40">
           <TableHead className="px-4">名称</TableHead>
           <TableHead>能力</TableHead>
-          <TableHead>令牌</TableHead>
           <TableHead>最近使用</TableHead>
           <TableHead>状态</TableHead>
           <TableHead className="w-40 px-4 text-right">操作</TableHead>
@@ -120,7 +107,6 @@ function ProjectTable({
                 )}
               </div>
             </TableCell>
-            <TableCell className="py-3 tabular-nums">{item.token_count}</TableCell>
             <TableCell className="text-muted-foreground py-3 tabular-nums">
               {formatMCPTime(item.last_used_at)}
             </TableCell>
@@ -134,10 +120,10 @@ function ProjectTable({
                 编辑
               </RowAction>
               <RowAction
-                aria-label={`${item.name} 的令牌`}
+                aria-label={`${item.name} 的接入配置`}
                 onClick={() => state.toggleTokens(item.id)}
               >
-                令牌
+                配置
               </RowAction>
               <RowAction
                 aria-label={item.enabled ? `停用 ${item.name}` : `启用 ${item.name}`}
@@ -175,41 +161,13 @@ function TokenStatusTag({ token, now }: { token: MCPTokenItem; now: number }) {
   return <Tag tone={tone}>{TOKEN_STATUS_LABEL[status]}</Tag>;
 }
 
-/** 刚签发令牌的明文块：明文只在这里出现，附可直接粘贴的配置片段。 */
-function IssuedTokenPanel({
-  state,
-  project,
-}: {
-  state: MCPProjectsState;
-  project: MCPProjectItem;
-}) {
-  if (!state.issued) return null;
-  const origin = typeof window === "undefined" ? "" : window.location.origin;
-  const snippet = mcpConfigSnippet(state.issued.token, state.issued.endpoint, origin);
-  return (
-    <SecretReveal className="mb-4">
-      <SecretRevealTitle>令牌已签发：明文只显示这一次</SecretRevealTitle>
-      <SecretRevealValue>
-        <SecretRevealCode>{state.issued.token}</SecretRevealCode>
-        <CopyButton text={state.issued.token} variant="outline" />
-      </SecretRevealValue>
-      <SecretRevealHint>
-        粘贴到外部 AI 工具的配置里即可连接；端点 {origin}
-        {state.issued.endpoint}，默认画布「
-        {project.canvas_title || project.canvas_code || "未设，调用时指定"}」。
-      </SecretRevealHint>
-      <SecretRevealActions>
-        <CopyButton text={snippet} label="复制配置片段" variant="outline" />
-        <Button variant="ghost" size="sm" onClick={state.clearIssued}>
-          我已保存
-        </Button>
-      </SecretRevealActions>
-    </SecretReveal>
-  );
-}
-
-/** 令牌面板：签发表单 + 令牌列表。 */
-function TokenPanel({
+/**
+ * 接入配置：一个项目一块，不再往下套一层「令牌列表」。
+ *
+ * 一个项目只有一枚令牌，用户真正要的是能粘进客户端的片段，所以展开就是片段本身：
+ * 刚新建或刚重新生成时直接用响应里的明文，其余时候点一下按需取回（库里存的是 AES-GCM 密文）。
+ */
+function AccessPanel({
   state,
   project,
   now,
@@ -218,113 +176,106 @@ function TokenPanel({
   project: MCPProjectItem;
   now: number;
 }) {
-  const form = state.tokenForm;
-  const submit = (event: FormEvent) => {
-    event.preventDefault();
-    void state.issue(project.id, form);
+  const token = project.token ?? null;
+  const issuedHere =
+    state.issued && state.issued.item.project_id === project.id ? state.issued : null;
+  const [revealed, setRevealed] = useState<string | null>(null);
+  const [fetching, setFetching] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const origin = typeof window === "undefined" ? "" : window.location.origin;
+  const endpointPath = issuedHere?.endpoint ?? "/api/v1/mcp";
+  const plain = issuedHere?.token ?? revealed;
+  const snippet = plain ? mcpConfigSnippet(plain, endpointPath, origin) : "";
+
+  /** 按需取回明文：不自动拉，避免明文在用户没打算复制时也躺在屏幕上。 */
+  const reveal = async () => {
+    if (!token) return;
+    setFetching(true);
+    setFailed(false);
+    try {
+      setRevealed(await state.tokenSecret(project.id));
+    } catch {
+      setFailed(true);
+    } finally {
+      setFetching(false);
+    }
   };
-  // 一个项目只留一枚令牌：已有就说明这次是轮换，旧令牌会立刻失效
-  const rotating = state.tokens.length > 0;
+
+  const placeholder = fetching
+    ? "正在取回令牌…"
+    : failed
+      ? "明文取不回来（这枚令牌签发时还没存密文），点下面「重新生成令牌」换一枚"
+      : token
+        ? "点「显示配置片段」取回令牌明文，才拼得出配置"
+        : "这个项目还没有令牌，点「生成令牌」生成一枚";
+
   return (
-    <section className={PANEL} data-slot="mcp-token-panel">
-      <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold">
-        <KeyRound className="size-4" aria-hidden="true" />「{project.name}」的令牌
+    <section className={PANEL} data-slot="mcp-access-panel">
+      <h2 className="mb-1 flex items-center gap-2 text-sm font-semibold">
+        <KeyRound className="size-4" aria-hidden="true" />「{project.name}」的接入配置
       </h2>
-      <IssuedTokenPanel state={state} project={project} />
-      <form onSubmit={submit} noValidate className="mb-4 flex flex-wrap items-start gap-3">
-        <FormField label="用途" htmlFor="mcp-token-name" className="min-w-44 flex-1">
-          <Input
-            id="mcp-token-name"
-            value={form.name}
-            placeholder="如：本机 Codex"
-            onChange={(e) => state.setTokenForm({ ...form, name: e.target.value })}
-          />
-        </FormField>
-        <FormField
-          label="有效期（天，1–90）"
-          htmlFor="mcp-token-days"
-          hint="留空用后台配的默认值"
-          className="w-40"
-        >
-          <Input
-            id="mcp-token-days"
-            type="number"
-            inputMode="numeric"
-            min={1}
-            max={90}
-            value={form.days}
-            onChange={(e) => state.setTokenForm({ ...form, days: e.target.value })}
-          />
-        </FormField>
-        <Button type="submit" disabled={state.busy} className="mt-[22px]">
-          <Plus />
-          {rotating ? "重新签发" : "签发"}
-        </Button>
-      </form>
-      {state.tokensLoading ? (
-        <p className="text-muted-foreground text-sm">加载中…</p>
-      ) : state.tokens.length === 0 ? (
-        <p className="text-muted-foreground text-sm">还没有令牌。签发一个，外部工具才连得上。</p>
-      ) : (
-        <Table>
-          <TableHeader>
-            <TableRow className="bg-muted/40 hover:bg-muted/40">
-              <TableHead className="px-4">用途</TableHead>
-              <TableHead>前缀</TableHead>
-              <TableHead>到期</TableHead>
-              <TableHead>最近使用</TableHead>
-              <TableHead>状态</TableHead>
-              <TableHead className="w-20 px-4 text-right">操作</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {state.tokens.map((token) => (
-              <TableRow key={token.id} data-token-id={token.id}>
-                <TableCell className="px-4 py-3 font-medium">{token.name}</TableCell>
-                <TableCell className="py-3 font-mono text-xs">{token.prefix}…</TableCell>
-                <TableCell className="py-3 tabular-nums">
-                  {formatMCPTime(token.expires_at)}
-                </TableCell>
-                <TableCell className="text-muted-foreground py-3 tabular-nums">
-                  {formatMCPTime(token.last_used_at)}
-                </TableCell>
-                <TableCell className="py-3">
-                  <TokenStatusTag token={token} now={now} />
-                </TableCell>
-                <TableCell className="px-4 py-3 text-right whitespace-nowrap">
-                  {token.has_secret && tokenStatus(token, now) === "active" && (
-                    <CopySecretButton load={() => state.tokenSecret(project.id, token)} />
-                  )}
-                  {!token.revoked_at && (
-                    <RowAction
-                      tone="danger"
-                      aria-label={`注销 ${token.name}`}
-                      onClick={() =>
-                        void confirm({
-                          title: `注销「${token.name}」？`,
-                          description: "立即失效，不可恢复",
-                          destructive: true,
-                          confirmLabel: "注销",
-                          onConfirm: () => state.revoke(project.id, token),
-                        })
-                      }
-                    >
-                      注销
-                    </RowAction>
-                  )}
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+      <p className="text-muted-foreground mb-3 text-xs">
+        端点{" "}
+        <code className="font-mono">
+          {origin}
+          {endpointPath}
+        </code>
+        ；一个项目只有一枚令牌，重新生成会让旧令牌立刻失效。
+      </p>
+      {!project.enabled && (
+        <Notice tone="warning" className="mb-3" title="项目已停用">
+          外部工具现在连不上，配置片段先留着，启用后立即恢复。
+        </Notice>
       )}
+      <CopyBlock>
+        <CopyBlockHeader>
+          <CopyBlockTitle>客户端配置（粘进 Claude Desktop / Codex 等）</CopyBlockTitle>
+          {snippet && <CopyButton text={snippet} />}
+        </CopyBlockHeader>
+        <CopyBlockCode>{snippet || placeholder}</CopyBlockCode>
+      </CopyBlock>
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        {token ? <TokenStatusTag token={token} now={now} /> : null}
+        {token && (
+          <span className="text-muted-foreground text-xs tabular-nums">
+            前缀 {token.prefix}… · 到期 {formatMCPTime(token.expires_at)} · 最近使用{" "}
+            {formatMCPTime(token.last_used_at)}
+          </span>
+        )}
+        <div className="ml-auto flex gap-2">
+          {!plain && token?.has_secret && (
+            <Button variant="outline" size="sm" disabled={fetching} onClick={() => void reveal()}>
+              显示配置片段
+            </Button>
+          )}
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={state.busy}
+            onClick={() =>
+              void confirm({
+                title: token ? "重新生成令牌？" : "生成令牌？",
+                description: token
+                  ? "现在这枚会立刻失效，正在用它的外部工具要换成新的才能连上"
+                  : "给这个项目生成一枚令牌，生成后就能复制配置",
+                destructive: !!token,
+                confirmLabel: token ? "重新生成" : "生成",
+                onConfirm: () => state.rotate(project.id),
+              })
+            }
+          >
+            <KeyRound />
+            {token ? "重新生成令牌" : "生成令牌"}
+          </Button>
+        </div>
+      </div>
     </section>
   );
 }
 
 /**
- * MCP 接入页：说明、新建表单、项目表格、选中项目的令牌面板。
- * 外部 AI 工具用这里签发的令牌连接 /api/v1/mcp；令牌明文只在签发后显示一次。
+ * MCP 接入页：说明、新建项目、项目表格、选中项目的接入配置。
+ * 一个项目就是一个接入点，建项目时令牌已经签好；配置片段在展开的那一块里，不再单独分层。
  *
  * @param mode admin = 后台代管（能指定归属用户、看全部项目）；self = 用户自己的接入
  */
@@ -381,7 +332,7 @@ export function MCPProjectsView({
         </DataPanelBody>
       </DataPanel>
 
-      {selected && <TokenPanel state={state} project={selected} now={now} />}
+      {selected && <AccessPanel state={state} project={selected} now={now} />}
 
       {target && <ProjectDialog target={target} state={state} onClose={() => setTarget(null)} />}
     </DataPage>

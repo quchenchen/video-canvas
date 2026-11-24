@@ -16,8 +16,11 @@ export interface MCPProjectItem {
   canvas_title?: string;
   /** 是否启用：停用后该项目全部令牌立刻失效 */
   enabled: boolean;
-  /** 有效令牌数量（不含已注销） */
-  token_count: number;
+  /**
+   * 这个项目唯一的一枚令牌；还没生成过（老数据）就是空。
+   * 一个项目一个接入，不存在「多枚令牌」的列表。
+   */
+  token?: MCPTokenItem;
   /** 最近一次调用的时间，从未使用为 null */
   last_used_at?: string;
   created_at: string;
@@ -57,15 +60,10 @@ export interface MCPTokenItem {
   created_at: string;
 }
 
-/** 令牌列表 */
-export interface MCPTokenList {
-  items: MCPTokenItem[];
-}
-
 /** 签发令牌 */
 export interface IssueMCPTokenReq {
-  /** 用途备注，1–64 字 */
-  name: string;
+  /** 用途备注，1–64 字；留空由服务端用默认名（一个项目只有一枚令牌，用途没有区分余地） */
+  name?: string;
   /** 有效天数，1–90；不传就用后台配的默认值 */
   days?: number;
 }
@@ -77,4 +75,15 @@ export interface IssuedMCPToken {
   token: string;
   /** 端点路径，前端补上 origin 就是可直接粘贴的地址 */
   endpoint: string;
+}
+
+/**
+ * 新建项目的结果：项目 + 首枚令牌。
+ *
+ * 一个项目就是一个接入点，建项目时令牌一起签好，用户拿到响应就能直接粘配置，
+ * 不用再点一次「签发」。
+ */
+export interface MCPProjectCreated {
+  item: MCPProjectItem;
+  issued: IssuedMCPToken;
 }

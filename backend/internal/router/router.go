@@ -21,12 +21,12 @@ type Handlers struct {
 	Storyboard     *handler.StoryboardHandler     // 画布分镜表：从剧本拆分镜
 	CanvasCompose  *handler.CanvasComposeHandler  // 画布成片合成：把已生成的片段按顺序拼成一个 mp4
 	CanvasArchive  *handler.CanvasArchiveHandler  // 画布素材按节点归类打包下载（票据签发 + 流式 zip）
-	Conversation   *handler.ConversationHandler   // 首页生成：对话与生成记录
 	// MCP：对外接入端点与后台项目管理。MCP 为 nil 表示没启用画布 Agent，端点不注册。
-	MCP      *mcphandler.Server
-	MCPAuth  middleware.MCPAuthenticator // 校验 MCP 项目令牌（Bearer vcm_…）
-	AdminMCP *handler.MCPAdminHandler    // 后台「MCP 接入」：全局视角的项目与令牌管理
-	MCPMe    *handler.MCPSelfHandler     // 「我的 MCP 接入」：任何登录用户给自己开
+	MCP          *mcphandler.Server
+	MCPAuth      middleware.MCPAuthenticator  // 校验 MCP 项目令牌（Bearer vcm_…）
+	AdminMCP     *handler.MCPAdminHandler     // 后台「MCP 接入」：全局视角的项目与令牌管理
+	MCPMe        *handler.MCPSelfHandler      // 「我的 MCP 接入」：任何登录用户给自己开
+	Conversation *handler.ConversationHandler // 首页生成：对话与生成记录
 	// AgentProxy：画布 Agent 的会话、运行、审批、评价由独立的 Agent 服务负责，这些接口只校验登录态后反向代理过去
 	// （路径、方法、信封不变）；技能目录等仍由 Go 自己处理。为 nil 表示没有启用 Agent，这些接口统一返回「Agent 暂不可用」。
 	AgentProxy      *agenthandler.AgentProxyHandler
@@ -139,10 +139,9 @@ func New(mode, jwtSecret string, h Handlers) *gin.Engine {
 			mcpMe.POST("/projects", h.MCPMe.Create)
 			mcpMe.PUT("/projects/:id", h.MCPMe.Update)
 			mcpMe.DELETE("/projects/:id", h.MCPMe.Delete)
-			mcpMe.GET("/projects/:id/tokens", h.MCPMe.ListTokens)
-			mcpMe.POST("/projects/:id/tokens", h.MCPMe.IssueToken)
-			mcpMe.DELETE("/projects/:id/tokens/:tokenId", h.MCPMe.RevokeToken)
-			mcpMe.GET("/projects/:id/tokens/:tokenId/secret", h.MCPMe.TokenSecret)
+			// 一个项目只有一个接入、只有一枚令牌：生成/轮换是同一个动作，明文单独取
+			mcpMe.POST("/projects/:id/token", h.MCPMe.IssueToken)
+			mcpMe.GET("/projects/:id/token/secret", h.MCPMe.TokenSecret)
 		}
 
 		// 画布操作
@@ -427,10 +426,9 @@ func New(mode, jwtSecret string, h Handlers) *gin.Engine {
 			mcpAdmin.POST("/projects", h.AdminMCP.Create)
 			mcpAdmin.PUT("/projects/:id", h.AdminMCP.Update)
 			mcpAdmin.DELETE("/projects/:id", superOnly, h.AdminMCP.Delete)
-			mcpAdmin.GET("/projects/:id/tokens", h.AdminMCP.ListTokens)
-			mcpAdmin.POST("/projects/:id/tokens", h.AdminMCP.IssueToken)
-			mcpAdmin.DELETE("/projects/:id/tokens/:tokenId", h.AdminMCP.RevokeToken)
-			mcpAdmin.GET("/projects/:id/tokens/:tokenId/secret", h.AdminMCP.TokenSecret)
+			// 一个项目只有一个接入、只有一枚令牌：生成/轮换是同一个动作，明文单独取
+			mcpAdmin.POST("/projects/:id/token", h.AdminMCP.IssueToken)
+			mcpAdmin.GET("/projects/:id/token/secret", h.AdminMCP.TokenSecret)
 		}
 
 		// 存储配置（素材存到哪）：读 = admin 或 super_admin；测试 / 创建 / 修改 / 换密钥 / 设默认 / 删除 = 仅 super_admin。

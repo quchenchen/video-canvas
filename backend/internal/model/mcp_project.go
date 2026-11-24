@@ -186,13 +186,15 @@ type MCPProjectView struct {
 	OwnerName   string   `json:"owner_name,omitempty"`
 	Scopes      []string `json:"scopes"`
 	// CanvasCode 是默认画布地址里的那串十六进制 id；没设默认画布时为空。
-	CanvasCode  string  `json:"canvas_code,omitempty"`
-	CanvasTitle string  `json:"canvas_title,omitempty"`
-	Enabled     bool    `json:"enabled"`
-	TokenCount  int     `json:"token_count"`
-	LastUsedAt  *string `json:"last_used_at,omitempty"`
-	CreatedAt   string  `json:"created_at"`
-	UpdatedAt   string  `json:"updated_at"`
+	CanvasCode  string `json:"canvas_code,omitempty"`
+	CanvasTitle string `json:"canvas_title,omitempty"`
+	Enabled     bool   `json:"enabled"`
+	// Token 是这个项目唯一的一枚令牌：一个项目就是一个接入，不存在「令牌列表」。
+	// 还没生成过（老数据）时为 nil，界面据此提示「生成令牌」。
+	Token      *MCPTokenView `json:"token,omitempty"`
+	LastUsedAt *string       `json:"last_used_at,omitempty"`
+	CreatedAt  string        `json:"created_at"`
+	UpdatedAt  string        `json:"updated_at"`
 }
 
 // MCPTokenView 是令牌列表项：只给前 8 位，拿不到明文。
@@ -233,10 +235,19 @@ type MCPProjectReq struct {
 	Enabled *bool    `json:"enabled" binding:"omitempty" label:"启用"`
 }
 
+// MCPProjectCreated 是新建项目的结果：项目本身 + 首枚令牌（明文只在这一个响应里出现）。
+//
+// 一个项目就是一个接入点，所以建项目时令牌一起签好。只建项目不给令牌的话，用户还得再点一次
+// 「签发」才拿得到能粘进客户端的配置，多一层也容易漏掉。
+type MCPProjectCreated struct {
+	Item   *MCPProjectView `json:"item"`
+	Issued *MCPIssuedToken `json:"issued"`
+}
+
 // MCPTokenIssueReq 是签发令牌的请求体：有效期 1–90 天，不允许永久令牌。
-// Days 留空（不传或传 0）表示用后台「注册设置」里的默认有效期，服务层兜底。
+// Name 留空时用默认名（新建项目自动签发就走的这条路）；Days 留空（不传或传 0）用后台默认有效期。
 type MCPTokenIssueReq struct {
-	Name string `json:"name" binding:"required,max=64" label:"用途"`
+	Name string `json:"name" binding:"omitempty,max=64" label:"用途"`
 	Days int    `json:"days" binding:"omitempty,min=1,max=90" label:"有效期"`
 }
 
