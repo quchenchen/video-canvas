@@ -233,10 +233,19 @@ type MCPProjectReq struct {
 	Enabled *bool    `json:"enabled" binding:"omitempty" label:"启用"`
 }
 
+// MCPProjectCreated 是新建项目的结果：项目本身 + 首枚令牌（明文只在这一个响应里出现）。
+//
+// 一个项目就是一个接入点，所以建项目时令牌一起签好。只建项目不给令牌的话，用户还得再点一次
+// 「签发」才拿得到能粘进客户端的配置，多一层也容易漏掉。
+type MCPProjectCreated struct {
+	Item   *MCPProjectView `json:"item"`
+	Issued *MCPIssuedToken `json:"issued"`
+}
+
 // MCPTokenIssueReq 是签发令牌的请求体：有效期 1–90 天，不允许永久令牌。
-// Days 留空（不传或传 0）表示用后台「注册设置」里的默认有效期，服务层兜底。
+// Name 留空时用默认名（新建项目自动签发就走的这条路）；Days 留空（不传或传 0）用后台默认有效期。
 type MCPTokenIssueReq struct {
-	Name string `json:"name" binding:"required,max=64" label:"用途"`
+	Name string `json:"name" binding:"omitempty,max=64" label:"用途"`
 	Days int    `json:"days" binding:"omitempty,min=1,max=90" label:"有效期"`
 }
 

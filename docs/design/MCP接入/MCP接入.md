@@ -491,3 +491,33 @@ CREATE INDEX idx_mcp_project_tokens_project ON mcp_project_tokens (project_id);
   `TestDrama_ExternalMode`、`TestDrama_ExternalDirectWrite`（直连落库、参数校验仍生效）、
   `TestDrama_ExternalRunJob`（幂等键高位、重放不重复建任务）、`TestDrama_ExternalRejectsNonDramaCanvas`。
 - 前端 `bun test src/tests/utils/admin/mcp-project.test.ts` 28 项通过、`tsc -b` 无错。
+
+## 18. 第五轮：一个项目一个接入，建好即给配置（2026-11-24）
+
+### 为什么改
+
+第一版把「项目」与「令牌」分成两层：建项目只写一行记录，令牌要再点一次「签发」才出现，
+明文与配置片段也是那一步之后才有。实际用起来是三步（建项目 → 签发 → 复制），
+而列表里的 `token_count` 只可能是 0 或 1——这层「令牌列表」没有第二种形态。
+
+### 改了什么
+
+| 层 | 改动 |
+| --- | --- |
+| 接口 | `POST /admin/mcp/projects` 与 `POST /me/mcp/projects` 的响应从项目变成 `{item, issued}`：项目 + 首枚令牌（明文、端点）。令牌名默认「接入令牌」，有效期取「注册设置」的默认值 |
+| 服务 | 抽出 `issue()`，`Create` 与 `IssueToken` 共用同一套签发规则；`Create` 里签发失败会 `DeleteProject` 回滚，不留连不上的空接入 |
+| 请求 | `MCPTokenIssueReq.name` 从 required 改为可空：留空由服务端用默认名，「重新生成」不再需要填表 |
+| 页面 | 删掉「令牌列表 + 签发表单」，项目展开就是「接入配置」：配置片段、令牌状态与到期、重新生成 |
+| 删除 | `copy-secret-button.tsx` 不再有使用者，随面板一起删掉 |
+
+### 取舍
+
+- 明文默认不显示：配置片段要先点「显示配置片段」，此时才向服务端要密文并拼片段，
+  避免一进页面就把令牌摊在屏幕上。
+- 不做「先建项目、事后补签」：一个项目一枚令牌，补签与重新生成是同一个动作，只留一个按钮。
+
+### 验证
+
+- 后端：`TestMCPOwnedCreateForcesSelfAndAllowsNoDefaultCanvas` 增加「返回里必须带首枚令牌明文」的断言；
+  `go test ./internal/tests/service/ ./internal/tests/handler/ -run MCP` 全绿。
+- 前端：`tsc -b` 无错；`bun test src/tests/utils/admin/` 960 项通过。

@@ -17,8 +17,8 @@ import (
 type MCPSelfAPI interface {
 	// OwnedList 列出自己的项目。
 	OwnedList(ctx context.Context, ownerID uint64) ([]*model.MCPProjectView, error)
-	// OwnedCreate 给自己建项目。
-	OwnedCreate(ctx context.Context, ownerID uint64, req *model.MCPProjectReq) (*model.MCPProjectView, error)
+	// OwnedCreate 给自己建项目，并签发首枚令牌（明文只在这一次响应里）。
+	OwnedCreate(ctx context.Context, ownerID uint64, req *model.MCPProjectReq) (*model.MCPProjectCreated, error)
 	// OwnedUpdate 改自己的项目（含启停）。
 	OwnedUpdate(ctx context.Context, ownerID, projectID uint64, req *model.MCPProjectReq) (*model.MCPProjectView, error)
 	// OwnedDelete 删自己的项目与它的令牌。

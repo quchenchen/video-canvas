@@ -3,6 +3,7 @@ import service from "@/utils/requests/service";
 import type {
   IssueMCPTokenReq,
   IssuedMCPToken,
+  MCPProjectCreated,
   MCPProjectItem,
   MCPProjectList,
   MCPProjectReq,
@@ -20,11 +21,12 @@ export const listMyMCPProjects = async (): Promise<MCPProjectItem[]> =>
   ((await service.get<MCPProjectList | null>(ep.list(), undefined)) ?? { items: [] }).items ?? [];
 
 /**
- * 新建接入项目；归属固定为当前登录用户，请求体不用带 owner_user_id
+ * 新建接入项目；归属固定为当前登录用户，请求体不用带 owner_user_id。
+ * 服务端在建项目的同一次请求里签好首枚令牌，返回里直接带明文与端点。
  * @param data 名称、默认画布（可空）、权限档位
  */
 export const createMyMCPProject = (data: MCPProjectReq) =>
-  service.post<MCPProjectItem>(ep.create(), data);
+  service.post<MCPProjectCreated>(ep.create(), data);
 
 /**
  * 修改自己的项目（含启停）

@@ -64,8 +64,8 @@ export interface MCPTokenList {
 
 /** 签发令牌 */
 export interface IssueMCPTokenReq {
-  /** 用途备注，1–64 字 */
-  name: string;
+  /** 用途备注，1–64 字；留空由服务端用默认名（一个项目只有一枚令牌，用途没有区分余地） */
+  name?: string;
   /** 有效天数，1–90；不传就用后台配的默认值 */
   days?: number;
 }
@@ -77,4 +77,15 @@ export interface IssuedMCPToken {
   token: string;
   /** 端点路径，前端补上 origin 就是可直接粘贴的地址 */
   endpoint: string;
+}
+
+/**
+ * 新建项目的结果：项目 + 首枚令牌。
+ *
+ * 一个项目就是一个接入点，建项目时令牌一起签好，用户拿到响应就能直接粘配置，
+ * 不用再点一次「签发」。
+ */
+export interface MCPProjectCreated {
+  item: MCPProjectItem;
+  issued: IssuedMCPToken;
 }

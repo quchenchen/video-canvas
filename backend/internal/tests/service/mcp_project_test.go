@@ -241,17 +241,17 @@ func newMCPFixture(t *testing.T) *mcpFixture {
 	return f
 }
 
-// create 建一个项目并返回它。
+// create 建一个项目并返回它。项目创建时自带一枚令牌，这里只取项目本身。
 func (f *mcpFixture) create(t *testing.T) *model.MCPProjectView {
 	t.Helper()
-	v, err := f.svc.Create(context.Background(), 9, &model.MCPProjectReq{
+	created, err := f.svc.Create(context.Background(), 9, &model.MCPProjectReq{
 		Name: "本机 Codex", OwnerUserID: "7", CanvasCode: canvasCode(18),
 		Scopes: []string{model.MCPScopeCanvasRead, model.MCPScopeCanvasWrite},
 	})
 	if err != nil {
 		t.Fatalf("建项目失败：%v", err)
 	}
-	return v
+	return created.Item
 }
 
 // issue 给项目签一个令牌并返回明文。
@@ -465,15 +465,20 @@ func TestMCPOwnedCreateForcesSelfAndAllowsNoDefaultCanvas(t *testing.T) {
 	if err != nil {
 		t.Fatalf("自助建项目失败：%v", err)
 	}
-	if v.OwnerUserID != "7" {
-		t.Fatalf("归属必须固定为本人，得到 %s", v.OwnerUserID)
+	item := v.Item
+	if item.OwnerUserID != "7" {
+		t.Fatalf("归属必须固定为本人，得到 %s", item.OwnerUserID)
+	}
+	// 建项目时就把令牌签好：返回里必须带明文，用户不用再点一次「签发」
+	if v.Issued == nil || v.Issued.Token == "" {
+		t.Fatal("建项目应当同时返回首枚令牌的明文")
 	}
 	// 不填默认画布是允许的：调用方每次自己指定 canvas
-	if v.CanvasCode != "" {
-		t.Fatalf("没给默认画布时不该回画布 code，得到 %q", v.CanvasCode)
+	if item.CanvasCode != "" {
+		t.Fatalf("没给默认画布时不该回画布 code，得到 %q", item.CanvasCode)
 	}
-	if v.CanvasTitle != "" {
-		t.Fatalf("没给默认画布时不该回画布标题，得到 %q", v.CanvasTitle)
+	if item.CanvasTitle != "" {
+		t.Fatalf("没给默认画布时不该回画布标题，得到 %q", item.CanvasTitle)
 	}
 }
 
@@ -502,7 +507,7 @@ func TestMCPOwnedProjectsAreIsolated(t *testing.T) {
 	if err != nil {
 		t.Fatalf("自助建项目失败：%v", err)
 	}
-	projectID := mustID(t, mine.ID)
+	projectID := mustID(t, mine.Item.ID)
 
 	// 别人的列表里看不到
 	others, err := f.svc.OwnedList(context.Background(), 9)

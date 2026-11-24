@@ -13,8 +13,9 @@ import (
 // 下面这组方法给「我的 MCP 接入」用：任何登录用户都能给自己开接入，不必等管理员。
 // 与上面的管理端方法的区别只有两点：归属用户固定为调用者本人，且每个方法都先确认项目确实属于他。
 
-// OwnedCreate 用户自助建项目：归属固定为本人，请求体里的 owner_user_id 一律忽略。
-func (s *MCPProjectService) OwnedCreate(ctx context.Context, ownerID uint64, req *model.MCPProjectReq) (*model.MCPProjectView, error) {
+// OwnedCreate 用户自助建项目：归属固定为本人，请求体里的 owner_user_id 一律忽略；
+// 返回项目与首枚令牌（明文只在这一次响应里出现）。
+func (s *MCPProjectService) OwnedCreate(ctx context.Context, ownerID uint64, req *model.MCPProjectReq) (*model.MCPProjectCreated, error) {
 	n, err := s.d.Repo.CountProjectsByOwner(ctx, ownerID)
 	if err != nil {
 		return nil, err

@@ -16,8 +16,8 @@ import (
 type MCPProjectAPI interface {
 	// List 列出全部项目，带令牌数量与最近使用时间。
 	List(ctx context.Context) ([]*model.MCPProjectView, error)
-	// Create 新建项目。
-	Create(ctx context.Context, adminID uint64, req *model.MCPProjectReq) (*model.MCPProjectView, error)
+	// Create 新建项目并签发首枚令牌（明文只在这一次响应里）。
+	Create(ctx context.Context, adminID uint64, req *model.MCPProjectReq) (*model.MCPProjectCreated, error)
 	// Update 修改项目（含启停）。
 	Update(ctx context.Context, adminID, projectID uint64, req *model.MCPProjectReq) (*model.MCPProjectView, error)
 	// Delete 删除项目与它的令牌。

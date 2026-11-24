@@ -4,6 +4,7 @@ import { adminMCPProjectEndpoints as ep } from "./endpoints";
 import type {
   IssueMCPTokenReq,
   IssuedMCPToken,
+  MCPProjectCreated,
   MCPProjectItem,
   MCPProjectList,
   MCPProjectReq,
@@ -19,11 +20,12 @@ export const listMCPProjects = async (): Promise<MCPProjectItem[]> =>
   ((await service.get<MCPProjectList | null>(ep.list(), undefined)) ?? { items: [] }).items ?? [];
 
 /**
- * 新建项目
+ * 新建项目。服务端在建项目的同一次请求里就签好首枚令牌，
+ * 返回的 issued 带明文与端点，直接可以拼成配置片段。
  * @param data 名称、归属用户、画布、权限档位
  */
 export const createMCPProject = (data: MCPProjectReq) =>
-  service.post<MCPProjectItem>(ep.create(), data);
+  service.post<MCPProjectCreated>(ep.create(), data);
 
 /**
  * 修改项目（含启停）
